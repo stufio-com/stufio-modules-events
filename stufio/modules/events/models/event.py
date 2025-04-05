@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Any, Dict, Optional, List
 from uuid import uuid4
-from odmantic import Field, EmbeddedModel, UUID4
+from odmantic import Field, EmbeddedModel
+from odmantic.index import Index
+from pydantic import ConfigDict, UUID4
 from stufio.db.clickhouse_base import ClickhouseBase
 from stufio.db.mongo_base import MongoBase, datetime_now_sec
 
@@ -22,8 +24,8 @@ class EventLogModel(ClickhouseBase):
     action: str
     actor_type: str
     actor_id: str
-    payload: Optional[Dict[str, Any]] = None
-    metrics: Optional[Dict[str, Any]] = None
+    payload: Optional[str] = None  # JSON string
+    metrics: Optional[str] = None  # JSON string
     processed: bool = False
     processing_attempts: int = 0
     error_message: Optional[str] = None
@@ -38,13 +40,22 @@ class EventDefinitionModel(MongoBase):
     entity_type: str
     action: str
     description: Optional[str] = None
-    sample_payload: Optional[Dict[str, Any]] = None
+    payload_schema: Optional[Dict[str, Any]] = None
+    payload_example: Optional[Dict[str, Any]] = None
     module_name: str
+    require_actor: bool = False
+    require_entity: bool = True
     created_at: datetime = Field(default_factory=datetime_now)
     updated_at: datetime = Field(default_factory=datetime_now)
 
-    class Config:
-        collection = "event_definitions"
+    model_config = ConfigDict(
+        collection="event_definitions",
+        indexes=[
+            Index("name", unique=True),
+            Index("entity_type", "action"),
+            Index("module_name"),
+        ],
+    )
 
 class EventSubscriptionModel(MongoBase):
     """MongoDB model for storing event subscriptions."""
@@ -55,6 +66,11 @@ class EventSubscriptionModel(MongoBase):
     enabled: bool = True
     created_at: datetime = Field(default_factory=datetime_now)
     updated_at: datetime = Field(default_factory=datetime_now)
-
-    class Config:
-        collection = "event_subscriptions"
+    
+    model_config = ConfigDict(
+        collection="event_subscriptions",
+        indexes=[
+            Index("entity_type", "action"),
+            Index("module_name"),
+        ],
+    )

@@ -3,10 +3,17 @@ Base events used across the Stufio framework.
 
 Other modules should import and extend these event definitions.
 """
-from .schemas import EventDefinition
+from .schemas.event_definition import EventDefinition
+from .schemas.payloads import (
+    UserCreatedPayload, UserUpdatedPayload, UserDeletedPayload,
+    UserLoginPayload, UserLogoutPayload, TokenCreatedPayload,
+    TokenVerifiedPayload, TokenRevokedPayload, SystemStartupPayload,
+    SystemShutdownPayload, SystemErrorPayload
+)
 
-# User-related events
-class UserCreatedEvent(EventDefinition):
+# User-related events using the decorator pattern
+class UserCreatedEvent(EventDefinition[UserCreatedPayload]):
+    """Event triggered when a new user is created."""
     name = "user.created"
     entity_type = "user"
     action = "created"
@@ -14,28 +21,33 @@ class UserCreatedEvent(EventDefinition):
     require_entity = True
     description = "Triggered when a new user is created"
     payload_example = {
-        "user_id": "550e8400-e29b-41d4-a716-446655440000",
-        "email": "user@example.com",
-        "username": "username",
-        "roles": ["user"],
-        "is_active": True
+        "after": {
+            "user_id": "550e8400-e29b-41d4-a716-446655440000",
+            "email": "user@example.com",
+            "username": "username",
+            "roles": ["user"],
+            "is_active": True,
+        }
     }
 
-class UserUpdatedEvent(EventDefinition):
-    name = "user.updated"
-    entity_type = "user"
-    action = "updated"
-    require_actor = True
-    require_entity = True
-    description = "Triggered when a user's information is updated"
+
+class UserUpdatedEvent(EventDefinition[UserUpdatedPayload]):
+    """Event triggered when a user is updated."""
+    name = ("user.updated",)
+    entity_type = ("user",)
+    action = ("updated",)
+    require_actor = (True,)
+    require_entity = (True,)
+    description = ("Triggered when a user's information is updated",)
     payload_example = {
-        "user_id": "550e8400-e29b-41d4-a716-446655440000",
         "updated_fields": ["email", "username"],
         "before": {"email": "old@example.com"},
-        "after": {"email": "new@example.com"}
+        "after": {"email": "new@example.com"},
     }
 
-class UserDeletedEvent(EventDefinition):
+
+class UserDeletedEvent(EventDefinition[UserDeletedPayload]):
+    """Event triggered when a user is deleted."""
     name = "user.deleted"
     entity_type = "user"
     action = "deleted"
@@ -46,11 +58,13 @@ class UserDeletedEvent(EventDefinition):
         "user_id": "550e8400-e29b-41d4-a716-446655440000"
     }
 
-class UserLoginEvent(EventDefinition):
+
+class UserLoginEvent(EventDefinition[UserLoginPayload]):
+    """Event triggered when a user logs in."""
     name = "user.login"
     entity_type = "user"
     action = "login"
-    require_entity = True
+    require_entity = False
     description = "Triggered when a user logs in"
     payload_example = {
         "user_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -59,106 +73,101 @@ class UserLoginEvent(EventDefinition):
         "success": True
     }
 
-class UserLogoutEvent(EventDefinition):
+
+class UserLogoutEvent(EventDefinition[UserLogoutPayload]):
+    """Event triggered when a user logs out."""
     name = "user.logout"
     entity_type = "user"
-    require_actor = True
-    require_entity = True
     action = "logout"
+    require_actor = True
+    require_entity = False
     description = "Triggered when a user logs out"
     payload_example = {
         "user_id": "550e8400-e29b-41d4-a716-446655440000",
         "session_id": "session123"
     }
 
-# Token-related events
-class TokenCreatedEvent(EventDefinition):
-    name = "token.created"
-    entity_type = "token"
-    action = "created"
-    require_actor = True
-    require_entity = True
-    description = "Triggered when a new token is created"
-    payload_example = {
+
+class TokenCreatedEvent(EventDefinition[TokenCreatedPayload]):
+    """Event triggered when a new token is created."""
+    name="token.created",
+    entity_type="token",
+    action="created",
+    require_actor=True,
+    require_entity=True,
+    description="Triggered when a new token is created",
+    payload_class=TokenCreatedPayload,
+    payload_example={
         "token_id": "token123",
         "user_id": "550e8400-e29b-41d4-a716-446655440000",
         "token_type": "access",
         "expires_at": "2025-04-01T12:00:00Z"
     }
 
-class TokenVerifiedEvent(EventDefinition):
-    name = "token.verified"
-    entity_type = "token"
-    action = "verified"
-    description = "Triggered when a token is successfully verified"
-    payload_example = {
+class TokenVerifiedEvent(EventDefinition[TokenVerifiedPayload]):
+    """Event triggered when a token is verified."""
+    name="token.verified",
+    entity_type="token",
+    action="verified",
+    description="Triggered when a token is successfully verified",
+    payload_example={
         "token_id": "token123",
         "user_id": "550e8400-e29b-41d4-a716-446655440000"
     }
 
-class TokenRevokedEvent(EventDefinition):
-    name = "token.revoked"
-    entity_type = "token"
-    action = "revoked"
-    require_actor = True
-    require_entity = True
-    description = "Triggered when a token is revoked"
-    payload_example = {
+class TokenRevokedEvent(EventDefinition[TokenRevokedPayload]):
+    """Event triggered when a token is revoked."""
+    name="token.revoked",
+    entity_type="token",
+    action="revoked",
+    require_actor=True,
+    require_entity=True,
+    description="Triggered when a token is revoked",
+    payload_example={
         "token_id": "token123",
         "user_id": "550e8400-e29b-41d4-a716-446655440000",
         "reason": "user_logout"
     }
 
-# System events
-class SystemStartupEvent(EventDefinition):
-    name = "system.startup"
-    entity_type = "system"
-    action = "startup"
-    require_actor = False
-    require_entity = False
-    description = "Triggered when the system starts up"
-    payload_example = {
+
+class SystemStartupEvent(EventDefinition[SystemStartupPayload]):
+    """Event triggered when the system starts up."""
+    name="system.startup",
+    entity_type="system",
+    action="startup",
+    require_actor=False,
+    require_entity=False,
+    description="Triggered when the system starts up",
+    payload_example={
         "version": "1.0.0",
         "environment": "production",
         "modules": ["users", "events", "activity"]
     }
-
-class SystemShutdownEvent(EventDefinition):
-    name = "system.shutdown"
-    entity_type = "system"
-    action = "shutdown"
-    require_actor = False
-    require_entity = False
-    description = "Triggered when the system shuts down"
-    payload_example = {
-        "reason": "scheduled_maintenance"
+    
+class SystemShutdownEvent(EventDefinition[SystemShutdownPayload]):
+    """Event triggered when the system shuts down."""
+    name="system.shutdown",
+    entity_type="system",
+    action="shutdown",
+    require_actor=False,
+    require_entity=False,
+    description="Triggered when the system shuts down",
+    payload_example={
+        "version": "1.0.0",
+        "environment": "production",
+        "shutdown_time": "2025-04-01T12:00:00Z"
     }
 
-class SystemErrorEvent(EventDefinition):
-    name = "system.error"
-    entity_type = "system"
-    action = "error"
-    require_actor = False
-    require_entity = False
-    description = "Triggered when a system error occurs"
-    payload_example = {
-        "error_type": "database_connection",
-        "error_message": "Connection refused",
-        "stacktrace": "...",
-        "severity": "critical"
+class SystemErrorEvent(EventDefinition[SystemErrorPayload]):
+    """Event triggered when a system error occurs."""
+    name="system.error",
+    entity_type="system",
+    action="error",
+    require_actor=False,
+    require_entity=False,
+    description="Triggered when a system error occurs",
+    payload_example={
+        "error_code": "500",
+        "error_message": "Internal Server Error",
+        "stack_trace": "Traceback (most recent call last)..."
     }
-
-# All events for discovery
-ALL_EVENTS = [
-    UserCreatedEvent,
-    UserUpdatedEvent,
-    UserDeletedEvent,
-    UserLoginEvent,
-    UserLogoutEvent,
-    TokenCreatedEvent,
-    TokenVerifiedEvent,
-    TokenRevokedEvent,
-    SystemStartupEvent,
-    SystemShutdownEvent,
-    SystemErrorEvent
-]

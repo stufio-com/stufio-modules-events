@@ -1,27 +1,25 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import List, Dict, Any, Optional
-from motor.core import AgnosticDatabase
-from ..schemas import EventDefinition, EventSubscription, EventMessage, EventLogResponse
+from ..schemas import (
+    EventSubscription,
+    EventLogResponse,
+    EventDefinitionResponse,
+)
 from ..models import EventDefinitionModel, EventSubscriptionModel
-from clickhouse_connect.driver.asyncclient import AsyncClient
-from stufio.api.deps import get_db, get_clickhouse
-from datetime import datetime
+
 
 router = APIRouter()
-
 
 @router.post("/publish", response_model=Dict[str, Any])
 async def publish_event(
     event_data: Dict[str, Any],
-    request: Request,
-    db: AgnosticDatabase = Depends(get_db)
+    request: Request
 ):
     """Publish a new event."""
-    if not hasattr(request.app.state, "event_bus"):
-        raise HTTPException(status_code=500, detail="Event bus not initialized")
+    # if not hasattr(request.app.state, "event_bus"):
+    #     raise HTTPException(status_code=500, detail="Event bus not initialized")
     
-    event_bus = request.app.state.event_bus
-    
+    from ..event_bus import event_bus
     # Extract required fields
     entity_type = event_data.get("entity", {}).get("type")
     entity_id = event_data.get("entity", {}).get("id")
@@ -51,63 +49,55 @@ async def publish_event(
     return {"status": "success", "event_id": str(event.event_id)}
 
 
-@router.post("/definition", response_model=Dict[str, Any])
+@router.post("/definition", response_model=EventDefinitionResponse)
 async def register_event_definition(
-    definition: EventDefinition,
+    definition: Any,
     request: Request,
-    db: AgnosticDatabase = Depends(get_db)
 ):
     """Register a new event definition."""
-    if not hasattr(request.app.state, "event_bus"):
-        raise HTTPException(status_code=500, detail="Event bus not initialized")
-    
-    registry = request.app.state.event_bus.registry
-    
+    # if not hasattr(request.app.state, "event_bus"):
+    #     raise HTTPException(status_code=500, detail="Event bus not initialized")
+
+    from ..event_bus import event_bus
+
+    registry = event_bus.registry
+
     try:
-        db_definition = await registry.register_event_definition(definition)
-        return {
-            "status": "success",
-            "id": str(db_definition.id),
-            "name": db_definition.name
-        }
+        return await registry.register_event_definition(definition)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to register event definition: {str(e)}")
 
 
-@router.post("/subscription", response_model=Dict[str, Any])
+@router.post("/subscription", response_model=EventSubscription)
 async def register_subscription(
     subscription: EventSubscription,
     request: Request,
-    db: AgnosticDatabase = Depends(get_db)
 ):
     """Register a new event subscription."""
-    if not hasattr(request.app.state, "event_bus"):
-        raise HTTPException(status_code=500, detail="Event bus not initialized")
-    
-    registry = request.app.state.event_bus.registry
-    
+    # if not hasattr(request.app.state, "event_bus"):
+    #     raise HTTPException(status_code=500, detail="Event bus not initialized")
+
+    from ..event_bus import event_bus
+
+    registry = event_bus.registry
+
     try:
-        db_subscription = await registry.register_subscription(subscription)
-        return {
-            "status": "success",
-            "id": str(db_subscription.id)
-        }
+        return await registry.register_subscription(subscription)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to register subscription: {str(e)}")
 
 
-@router.get("/definitions", response_model=List[Dict[str, Any]])
-async def list_event_definitions(
-    request: Request,
-    db: AgnosticDatabase = Depends(get_db)
-):
+@router.get("/definitions", response_model=List[EventDefinitionResponse])
+async def list_event_definitions(request: Request):
     """List all event definitions."""
-    if not hasattr(request.app.state, "event_bus"):
-        raise HTTPException(status_code=500, detail="Event bus not initialized")
-    
-    engine = request.app.state.event_bus.registry.engine
+    # if not hasattr(request.app.state, "event_bus"):
+    #     raise HTTPException(status_code=500, detail="Event bus not initialized")
+
+    from ..event_bus import event_bus
+
+    engine = event_bus.registry.engine
     definitions = await engine.find(EventDefinitionModel)
-    
+
     result = []
     for definition in definitions:
         result.append({
@@ -118,33 +108,25 @@ async def list_event_definitions(
             "description": definition.description,
             "module_name": definition.module_name
         })
-    
+
     return result
 
 
-@router.get("/subscriptions", response_model=List[Dict[str, Any]])
-async def list_subscriptions(
-    request: Request,
-    db: AgnosticDatabase = Depends(get_db)
-):
+@router.get("/subscriptions", response_model=List[EventSubscription])
+async def list_subscriptions(request: Request):
     """List all event subscriptions."""
-    if not hasattr(request.app.state, "event_bus"):
-        raise HTTPException(status_code=500, detail="Event bus not initialized")
-    
-    engine = request.app.state.event_bus.registry.engine
+    # if not hasattr(request.app.state, "event_bus"):
+    #     raise HTTPException(status_code=500, detail="Event bus not initialized")
+
+    from ..event_bus import event_bus
+
+    engine = event_bus.registry.engine
     subscriptions = await engine.find(EventSubscriptionModel)
-    
+
     result = []
     for subscription in subscriptions:
-        result.append({
-            "id": str(subscription.id),
-            "entity_type": subscription.entity_type,
-            "action": subscription.action,
-            "module_name": subscription.module_name,
-            "callback_url": subscription.callback_url,
-            "enabled": subscription.enabled
-        })
-    
+        result.append(subscription.dict())
+
     return result
 
 
@@ -152,28 +134,24 @@ async def list_subscriptions(
 async def list_event_logs(
     entity_type: Optional[str] = None,
     action: Optional[str] = None,
-    limit: int = 100,
-    clickhouse_db: AsyncClient = Depends(get_clickhouse)
+    limit: int = 100
 ):
     """List event logs with optional filtering."""
-    from ..event_bus import event_log_crud
-    
+    from ..crud import crud_event_log
+
     # Build query filters
     filters = {}
     if entity_type:
         filters["entity_type"] = entity_type
-    
+
     if action:
         filters["action"] = action
-    
+
     # Get events from Clickhouse
-    logs = await event_log_crud.get_multi(
-        clickhouse_db, 
-        filters=filters,
-        sort="timestamp DESC",
-        limit=limit
+    logs = await crud_event_log.get_multi(
+        filters=filters, sort="timestamp DESC", limit=limit
     )
-    
+
     # Convert to response models
     result = []
     for log in logs:
@@ -194,31 +172,31 @@ async def list_event_logs(
             error_message=log.error_message,
             created_at=log.created_at
         ))
-    
+
     return result
 
 
-@router.post("/replay", response_model=Dict[str, Any])
-async def replay_events(
-    request: Request,
-    background_tasks: BackgroundTasks,
-    entity_type: Optional[str] = None,
-    action: Optional[str] = None,
-    limit: int = 50,
-):
-    """Replay events for testing or recovery purposes."""
-    if not hasattr(request.app.state, "event_bus"):
-        raise HTTPException(status_code=500, detail="Event bus not initialized")
-    
-    event_bus = request.app.state.event_bus
-    
-    # Run replay in background task to avoid blocking
-    async def do_replay():
-        await event_bus.replay_events(entity_type, action, limit)
-    
-    background_tasks.add_task(do_replay)
-    
-    return {
-        "status": "success",
-        "message": f"Replaying up to {limit} events in the background"
-    }
+# @router.post("/replay", response_model=Dict[str, Any])
+# async def replay_events(
+#     request: Request,
+#     background_tasks: BackgroundTasks,
+#     entity_type: Optional[str] = None,
+#     action: Optional[str] = None,
+#     limit: int = 50,
+# ):
+#     """Replay events for testing or recovery purposes."""
+#     if not hasattr(request.app.state, "event_bus"):
+#         raise HTTPException(status_code=500, detail="Event bus not initialized")
+
+#     event_bus = request.app.state.event_bus
+
+#     # Run replay in background task to avoid blocking
+#     async def do_replay():
+#         await event_bus.replay_events(entity_type, action, limit)
+
+#     background_tasks.add_task(do_replay)
+
+#     return {
+#         "status": "success",
+#         "message": f"Replaying up to {limit} events in the background"
+#     }

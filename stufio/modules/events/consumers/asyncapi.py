@@ -8,9 +8,8 @@ from faststream.kafka.subscriber.asyncapi import AsyncAPIDefaultSubscriber
 from faststream.kafka.broker.registrator import KafkaRegistrator 
 from faststream.broker.types import Filter, MsgType
 from faststream.broker.utils import default_filter
-from httpx import get
-from stufio.modules.events.schemas.base import MessageHeader
-from stufio.modules.events.schemas.event_definition import EventDefinition
+from ..schemas.base import MessageHeader
+from ..schemas.event_definition import EventDefinition
 from stufio.core.config import get_settings
 from faststream.asyncapi.generate import get_app_schema as original_get_app_schema
 

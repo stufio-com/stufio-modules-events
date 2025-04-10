@@ -1,6 +1,7 @@
 """Event consumer modules."""
 
-# Import and apply patching immediately 
+# Import and apply patching immediately
+from calendar import c
 from .asyncapi import patched_get_schema
 
 # Make sure the patch is always applied
@@ -30,7 +31,20 @@ __all__ = [
     "get_patched_app_schema"
 ]
 
+# Register all consumers at initialization time
+def _register_module_consumers():
+    """Register all consumers from the events module."""
+    # Import lazily to avoid circular imports
+    from .kafka import get_kafka_router
+    # Import the consumer registry
+    from ..services.consumer_registry import consumer_registry
+
+    # Register with the registry
+    consumer_registry.register_router("events", "kafka", get_kafka_router())
+    consumer_registry.register_broker("events", "kafka", get_kafka_broker())
+
+# Register consumers
+_register_module_consumers()
+
 # Lazy load modules
-from . import kafka
-from . import asyncapi
 from . import clickhouse_event_log

@@ -23,6 +23,15 @@ class UserUpdatedPayload(BaseEventPayload):
     after: Optional[Dict[str, Any]] = None
     updated_fields: List[str]
 
+class UserPasswordResetPayload(BaseEventPayload):
+    """Payload for user.password_reset events."""
+    user_id: str
+    reset_token: Optional[str] = None
+    reset_link: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    success: bool = True
+
 class UserDeletedPayload(BaseEventPayload):
     """Payload for user.deleted events."""
     user_id: str
@@ -52,6 +61,11 @@ class TokenPayload(BaseEventPayload):
 class TokenCreatedPayload(BaseEventPayload):
     """Payload for token.created events."""
     after: TokenPayload
+
+class TokenRefreshPayload(BaseEventPayload):
+    """Payload for token.verified events."""
+    token_id: str
+    user_id: str
 
 class TokenVerifiedPayload(BaseEventPayload):
     """Payload for token.verified events."""

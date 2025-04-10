@@ -6,7 +6,7 @@ from ..schemas import (
     EventDefinitionResponse,
 )
 from ..models import EventDefinitionModel, EventSubscriptionModel
-
+from ..services.event_bus import get_event_bus
 
 router = APIRouter()
 
@@ -19,7 +19,7 @@ async def publish_event(
     # if not hasattr(request.app.state, "event_bus"):
     #     raise HTTPException(status_code=500, detail="Event bus not initialized")
     
-    from ..event_bus import event_bus
+    event_bus = get_event_bus()
     # Extract required fields
     entity_type = event_data.get("entity", {}).get("type")
     entity_id = event_data.get("entity", {}).get("id")
@@ -58,7 +58,7 @@ async def register_event_definition(
     # if not hasattr(request.app.state, "event_bus"):
     #     raise HTTPException(status_code=500, detail="Event bus not initialized")
 
-    from ..event_bus import event_bus
+    event_bus = get_event_bus()
 
     registry = event_bus.registry
 
@@ -77,7 +77,7 @@ async def register_subscription(
     # if not hasattr(request.app.state, "event_bus"):
     #     raise HTTPException(status_code=500, detail="Event bus not initialized")
 
-    from ..event_bus import event_bus
+    event_bus = get_event_bus()
 
     registry = event_bus.registry
 
@@ -93,7 +93,7 @@ async def list_event_definitions(request: Request):
     # if not hasattr(request.app.state, "event_bus"):
     #     raise HTTPException(status_code=500, detail="Event bus not initialized")
 
-    from ..event_bus import event_bus
+    event_bus = get_event_bus()
 
     engine = event_bus.registry.engine
     definitions = await engine.find(EventDefinitionModel)
@@ -118,7 +118,7 @@ async def list_subscriptions(request: Request):
     # if not hasattr(request.app.state, "event_bus"):
     #     raise HTTPException(status_code=500, detail="Event bus not initialized")
 
-    from ..event_bus import event_bus
+    event_bus = get_event_bus()
 
     engine = event_bus.registry.engine
     subscriptions = await engine.find(EventSubscriptionModel)

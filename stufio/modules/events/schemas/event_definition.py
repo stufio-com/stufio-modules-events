@@ -180,7 +180,7 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
                      metrics: Optional[Dict[str, Any]] = None):
         """Publish an event with the current event definition."""
         # Import inside function to avoid circular imports
-        from ..event_bus import get_event_bus
+        from ..services.event_bus import get_event_bus
         event_bus = get_event_bus()
 
         # Get event attributes

@@ -5,7 +5,7 @@ Other modules should import and extend these event definitions.
 """
 from .schemas.event_definition import EventDefinition
 from .schemas.payloads import (
-    UserCreatedPayload, UserUpdatedPayload, UserDeletedPayload,
+    TokenRefreshPayload, UserCreatedPayload, UserPasswordResetPayload, UserUpdatedPayload, UserDeletedPayload,
     UserLoginPayload, UserLogoutPayload, TokenCreatedPayload,
     TokenVerifiedPayload, TokenRevokedPayload, SystemStartupPayload,
     SystemShutdownPayload, SystemErrorPayload
@@ -33,12 +33,27 @@ class UserCreatedEvent(EventDefinition[UserCreatedPayload]):
 
 class UserUpdatedEvent(EventDefinition[UserUpdatedPayload]):
     """Event triggered when a user is updated."""
-    name = ("user.updated",)
-    entity_type = ("user",)
-    action = ("updated",)
-    require_actor = (True,)
-    require_entity = (True,)
-    description = ("Triggered when a user's information is updated",)
+    name = "user.updated"
+    entity_type = "user"
+    action = "updated"
+    require_actor = True
+    require_entity = True
+    description="Triggered when a user's information is updated",
+    payload_example = {
+        "updated_fields": ["email", "username"],
+        "before": {"email": "old@example.com"},
+        "after": {"email": "new@example.com"},
+    }
+
+
+class UserPasswordResetEvent(EventDefinition[UserPasswordResetPayload]):
+    """Event triggered when a user password reset is requested."""
+    name = "user.updated"
+    entity_type = "user"
+    action = "updated"
+    require_actor = True
+    require_entity = True
+    description = "Triggered when a user's password reset is requested"
     payload_example = {
         "updated_fields": ["email", "username"],
         "before": {"email": "old@example.com"},
@@ -104,6 +119,19 @@ class TokenCreatedEvent(EventDefinition[TokenCreatedPayload]):
         "expires_at": "2025-04-01T12:00:00Z"
     }
 
+
+class TokenRefreshEvent(EventDefinition[TokenRefreshPayload]):
+    """Event triggered when a token is refreshed."""
+    name="token.verified",
+    entity_type="token",
+    action="refresh",
+    description="Triggered when a token is successfully refreshed",
+    payload_example={
+        "token_id": "token123",
+        "user_id": "550e8400-e29b-41d4-a716-446655440000"
+    }
+
+
 class TokenVerifiedEvent(EventDefinition[TokenVerifiedPayload]):
     """Event triggered when a token is verified."""
     name="token.verified",
@@ -143,7 +171,7 @@ class SystemStartupEvent(EventDefinition[SystemStartupPayload]):
         "environment": "production",
         "modules": ["users", "events", "activity"]
     }
-    
+
 class SystemShutdownEvent(EventDefinition[SystemShutdownPayload]):
     """Event triggered when the system shuts down."""
     name="system.shutdown",

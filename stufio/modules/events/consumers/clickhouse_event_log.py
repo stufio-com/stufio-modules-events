@@ -1,10 +1,9 @@
 from faststream.kafka.fastapi import KafkaMessage, Logger
 
-from stufio.modules.events.consumers.asyncapi import stufio_event_subscriber
-from stufio.modules.events.consumers import get_kafka_broker, get_kafka_router
-from stufio.modules.events.events import UserCreatedEvent, UserLoginEvent, UserLoginPayload
-from stufio.modules.events import ActorType
-from stufio.modules.events.schemas import EventLogCreate
+from ..consumers.asyncapi import stufio_event_subscriber
+from ..consumers import get_kafka_broker, get_kafka_router
+from ..events import UserCreatedEvent, UserLoginEvent, UserLoginPayload
+from ..schemas import ActorType, EventLogCreate
 import json
 
 from stufio.modules.events.schemas.payloads import UserCreatedPayload, UserPayload
@@ -190,8 +189,6 @@ async def handle_user_login(
     event: BaseEventMessage[UserLoginPayload], logger: Logger
 ) -> None:
     """Handle user login events with strong typing."""
-
-    # registry.get_module_instance("events").track_handler()
 
     # This handler gets a properly typed UserLoginMessage
     logger.info(f"HANDLE USER LOGIN. User logged in from {event}")

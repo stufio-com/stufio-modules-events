@@ -1,7 +1,4 @@
-import asyncio
-import inspect
 import logging
-import importlib
 from typing import Dict, List, Set, Type, Optional, Any
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from pydantic import BaseModel
@@ -27,7 +24,6 @@ class KafkaTopicInitializer:
     def __init__(self):
         self.admin_client = None
         self.topics: Dict[str, TopicConfig] = {}
-        self.discovered_modules: Set[str] = set()
 
     async def initialize_client(self) -> None:
         """Initialize the Kafka admin client."""
@@ -115,60 +111,14 @@ class KafkaTopicInitializer:
             logger.error(f"Error extracting topic from {event_class.__name__}: {e}", exc_info=True)
             return None
 
-    def discover_events_in_module(self, module_path: str) -> List[Type[EventDefinition]]:
-        """Discover all event definition classes in a module."""
-        try:
-            module = importlib.import_module(module_path)
-            events = []
-
-            # First check for ALL_EVENTS list
-            if hasattr(module, "ALL_EVENTS") and isinstance(module.ALL_EVENTS, list):
-                for event_class in module.ALL_EVENTS:
-                    if (inspect.isclass(event_class) and 
-                        issubclass(event_class, EventDefinition) and 
-                        event_class != EventDefinition):
-                        events.append(event_class)
-            else:
-                # Fall back to inspecting module members
-                for name, obj in inspect.getmembers(module):
-                    if (inspect.isclass(obj) and 
-                        issubclass(obj, EventDefinition) and 
-                        obj != EventDefinition and
-                        obj.__module__ == module_path):
-                        events.append(obj)
-
-            logger.info(f"Discovered {len(events)} event(s) in {module_path}")
-            return events
-        except ImportError as e:
-            logger.warning(f"Could not import module {module_path}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Error discovering events in {module_path}: {e}", exc_info=True)
-            return []
-
     def discover_events_from_registry(self) -> List[Type[EventDefinition]]:
-        """Discover all event definition classes from the module registry."""
-        from stufio.core.module_registry import registry
-        all_events = []
-
-        # Process core events module
-        events_module_path = "stufio.modules.events.events"
-        events = self.discover_events_in_module(events_module_path)
-        all_events.extend(events)
-
-        # Process events from other modules
-        for module_name in registry.discovered_modules():
-            if module_name in self.discovered_modules:
-                continue
-
-            try:
-                module_path = f"stufio.modules.{module_name}.events"
-                module_events = self.discover_events_in_module(module_path)
-                all_events.extend(module_events)
-                self.discovered_modules.add(module_name)
-            except Exception as e:
-                logger.error(f"Error discovering events in module {module_name}: {e}", exc_info=True)
-
+        """Discover all event definition classes from the event registry."""
+        from ..services.event_registry import event_registry
+        
+        # Get all registered events from the registry
+        all_events = list(event_registry.registered_events.values())
+        logger.info(f"Discovered {len(all_events)} events from registry")
+        
         return all_events
 
     async def create_topic(self, config: TopicConfig) -> bool:

@@ -2,14 +2,17 @@ from typing import List, Any, Tuple
 import logging
 import asyncio
 from datetime import datetime
+import inspect
+import importlib
 
 from stufio.core.module_registry import ModuleInterface
 from stufio.core.stufioapi import StufioAPI
+from .schemas.event_definition import EventDefinition
 from .api import router
-from .models import EventDefinitionModel, EventSubscriptionModel, EventLogModel
 from .middleware import EventMiddleware
-from .consumer_registry import consumer_registry
+from .services.consumer_registry import consumer_registry
 from .__version__ import __version__
+from .helpers import register_module_events
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +21,23 @@ class KafkaModuleMixin:
     """Mixin for modules that need Kafka support."""
 
     # Kafka components
-    _kafka_router = None
-    _kafka_broker = None
-    _require_start_stop = True
+    _kafka_brokers = []
+    _require_start_stop = False
 
-    def register_kafka_consumers(self, app: StufioAPI, module_name: str) -> None:
+    def register(self: "ModuleInterface", app: StufioAPI) -> None:
+        """Register this module with the FastAPI app, including Kafka consumers."""
+        # First call the parent class's register method
+        super().register(app)
+
+        # Then register Kafka consumers
+        try:
+            self.register_kafka_consumers(app, self.name)
+        except Exception as e:
+            logger.error(f"Error registering Kafka consumers for module {self.name}: {str(e)}", exc_info=True)
+
+    def register_kafka_consumers(
+        self: "ModuleInterface", app: StufioAPI, module_name: str
+    ) -> None:
         """
         Register Kafka consumers for this module.
 
@@ -36,31 +51,31 @@ class KafkaModuleMixin:
             try:
                 logger.info(f"Registering Kafka consumers for {module_name} module")
 
-                # Use the registry to discover and register consumers
-                consumer_registry.register_consumers(app, module_name)
-
                 # Store the Kafka broker reference for lifecycle management, if available
                 try:
-                    # Try to get the broker from the module's kafka.py
-                    module_path = f"stufio.modules.{module_name}.consumers.kafka"
-                    module = __import__(module_path, fromlist=["kafka_broker"])
-                    self._kafka_broker = getattr(module, "kafka_broker", None)
-                    self._kafka_router = getattr(module, "kafka_router", None)
-                except ImportError:
-                    # If not found in the module, try to get from events module
-                    if module_name != "events":
-                        try:
-                            from stufio.modules.events.consumers.kafka import (
-                                kafka_broker,
-                                kafka_router,
-                            )
+                    # Use module_path from ModuleInfo via the property
+                    base_module_path = self.module_path
+                    if base_module_path:
+                        module_path = f"{base_module_path}.consumers"
+                    else:
+                        logger.error(f"Module path not available for {module_name}")
+                        return
 
-                            self._kafka_broker = kafka_broker
-                            self._kafka_router = kafka_router
-                        except ImportError:
-                            logger.warning(
-                                f"Could not find Kafka broker for {module_name}"
-                            )
+                    __import__(module_path, fromlist=["kafka_broker"])
+
+                    brokers = consumer_registry.get_module_brokers(module_name)
+                    if brokers:
+                        for broker in brokers.values():
+                            if broker:
+                                self._kafka_brokers.append(broker)
+                                logger.info(f"Registered Kafka broker {broker} for {module_name}")
+                                self._require_start_stop = True
+                    else:
+                        logger.debug(f"No customer kafka brokers found for {module_name}")
+
+                except ImportError as e:
+                    logger.error(f"Failed to import consumers module for {module_name}: {e}: {module_path}")
+                    logger.debug(f"Attempted import path: {module_path}")
 
                 logger.info(f"Kafka consumer registration complete for {module_name}")
             except Exception as e:
@@ -69,75 +84,110 @@ class KafkaModuleMixin:
                     exc_info=True,
                 )
 
-    async def start_kafka(self, app: StufioAPI) -> None:
-        """Start the Kafka broker connection."""
-        if (
-            self._kafka_broker
-            and getattr(app.app_settings, "events_KAFKA_ENABLED", False)
-            and getattr(app.app_settings, "events_APP_CONSUME_ROUTES", False)
-            and self._require_start_stop
-        ):
-            try:
-                logger.info(
-                    f"Starting Kafka broker connection to {app.app_settings.events_KAFKA_BOOTSTRAP_SERVERS}"
-                )
-                await self._kafka_broker.start()
-                logger.info("Kafka broker started successfully")
+    async def on_startup(self: "ModuleInterface", app: "StufioAPI") -> None:
+        """Called when the application starts up."""
+        await super().on_startup(app)
+        await self.start_kafka(app)
 
-                # Send a test message in debug mode
-                if getattr(app, "debug", False):
-                    await self._send_test_message()
+    async def on_shutdown(self: "ModuleInterface", app: "StufioAPI") -> None:
+        """Called when the application shuts down."""
+        await super().on_shutdown(app)
+        await self.stop_kafka(app)
+
+    async def start_kafka(self: "ModuleInterface", app: StufioAPI) -> None:
+        """Start the Kafka broker connection."""
+        if len(self._kafka_brokers) and self._require_start_stop:
+            try:
+                for broker in self._kafka_brokers:
+                    # Check if the broker is already started
+                    if not getattr(broker, "_started", False):
+                        logger.info(f"Starting Kafka broker {broker}")
+                        await broker.start()
+                        broker._started = True
+                    else:
+                        logger.info(f"Kafka broker {broker} is already started")
             except Exception as e:
                 logger.error(f"Failed to start Kafka: {str(e)}", exc_info=True)
 
-    async def stop_kafka(self, app: StufioAPI) -> None:
+    async def stop_kafka(self: "ModuleInterface", app: StufioAPI) -> None:
         """Stop the Kafka broker connection with proper cleanup."""
-        if self._kafka_broker:
-            try:
-                logger.info("Stopping Kafka broker connection")
+        if len(self._kafka_brokers) and self._require_start_stop:
+            for broker in self._kafka_brokers:
+                try:
+                    # Check if the broker is already closed
+                    if getattr(broker, "_closed", False):
+                        logger.info(f"Kafka broker {broker} is already closed")
+                        continue
 
-                # 4. Use the main broker shutdown method
-                if hasattr(self._kafka_broker, "shutdown"):
-                    # FastStream 0.2.x+ uses shutdown() method
-                    logger.info("Calling broker shutdown()")
-                    await self._kafka_broker.shutdown()
-                elif hasattr(self._kafka_broker, "close"):
-                    # Older versions use close()
-                    logger.info("Calling broker close()")
-                    await self._kafka_broker.close()
-                else:
-                    logger.warning("No shutdown or close method found for Kafka broker")
-                        
-                # Reset broker references to avoid duplicate shutdown attempts
-                broker = self._kafka_broker
-                self._kafka_broker = None
-                self._kafka_router = None
-                
-                # Set a flag on the broker to indicate it's been closed (prevents further access)
-                if hasattr(broker, "_closed"):
+                    logger.info(f"Stopping Kafka broker {broker}")
+
+                    #  Use the main broker shutdown method
+                    if hasattr(broker, "shutdown"):
+                        # FastStream 0.2.x+ uses shutdown() method
+                        logger.info("Calling broker shutdown()")
+                        await broker.shutdown()
+                    elif hasattr(broker, "close"):
+                        # Older versions use close()
+                        logger.info("Calling broker close()")
+                        await broker.close()
+                    else:
+                        logger.warning("No shutdown or close method found for Kafka broker")
+
+                    # Set the closed flag to prevent further access
                     broker._closed = True
 
-                logger.info("Kafka broker stopped successfully")
-            except Exception as e:
-                logger.error(f"Error stopping Kafka: {str(e)}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"Error stopping Kafka: {str(e)}", exc_info=True)
 
-    async def _send_test_message(self) -> None:
-        """Send a test message to Kafka."""
+
+class EventsModuleMixin:
+    """Mixin for modules that use the events system."""
+
+    _events = []
+
+    def register(self: "ModuleInterface", app: StufioAPI) -> None:
+        """Register this module with events system."""
+        # First call the parent class's register method
+        super().register(app)
+
+        self.register_module_events(app)
+
+    def register_module_events(self: "ModuleInterface", app: StufioAPI) -> None:
+        """Register events for this module."""
+        # Then register events
         try:
-            from datetime import datetime
+            # Look for ModuleInterface implementation using module_path from ModuleInfo
+            if hasattr(self, "_module_info") and self._module_info:
+                module = self._module_info.get_module()
+            else:
+                if not self.module_path:
+                    logger.error(f"Module path not available for {self.name}")
+                    return
+                module = importlib.import_module(self.module_path)
+                
+            # Clear existing events before registering new ones
+            self._events = []
+                
+            # Look for EventDefinition classes
+            for name, cls in inspect.getmembers(module):
+                if inspect.isclass(cls) and issubclass(cls, EventDefinition) and cls != EventDefinition:
+                    self._events.append(cls)
 
-            test_message = {
-                "event": "startup",
-                "timestamp": datetime.utcnow().isoformat(),
-                "module": getattr(self, "module_name", "unknown"),
-            }
-            await self._kafka_broker.publish(test_message, "test")
-            logger.info("Sent test message to Kafka")
+            if len(self._events) == 0:
+                logger.warning(f"No events found in {self.name} module")
+            else:
+                # Register all events in one place
+                register_module_events(self.name, self._events)
+                logger.info(f"Registered {self.name} module events: {self._events}")
+
         except Exception as e:
-            logger.warning(f"Failed to send test message: {str(e)}")
+            logger.error(
+                f"Error registering events for module {self.name}: {str(e)}",
+                exc_info=True,
+            )
 
 
-class EventsModule(ModuleInterface, KafkaModuleMixin):
+class EventsModule(KafkaModuleMixin, EventsModuleMixin, ModuleInterface):
     """Events module for event-driven architecture support."""
 
     version = __version__
@@ -147,82 +197,39 @@ class EventsModule(ModuleInterface, KafkaModuleMixin):
         """Register this module's routes with the FastAPI app."""
         app.include_router(router, prefix=self.routes_prefix)
 
-    def get_models(self) -> List[Any]:
-        """Return this module's database models."""
-        return [EventDefinitionModel, EventSubscriptionModel, EventLogModel]
-
     def get_middlewares(self) -> List[Tuple]:
         """Return middleware classes for this module.
 
         Returns:
             List of (middleware_class, args, kwargs) tuples
         """
-        return [(EventMiddleware, [], {})]
 
-    def track_handler(self, handler_name: str = None) -> None:
-        """Track the last time a handler was called.
+        # import debugpy
+
+        # # Allow connections to the debugger from any host
+        # debugpy.listen(("0.0.0.0", 5678))
+        # logger.error("Waiting for debugger to attach...")
+        # debugpy.wait_for_client()
         
-        Args:
-            handler_name: Optional name of the handler. If None, we'll try to detect
-                        the caller function name automatically.
-        """
-        if handler_name is None:
-            # Get the caller's function name using inspect
-            frame = inspect.currentframe()
-            try:
-                caller_frame = frame.f_back
-                if caller_frame:
-                    # Get function name from caller's frame
-                    handler_name = caller_frame.f_code.co_name
-
-                    # For more detailed tracking, you can include module name
-                    module_name = caller_frame.f_globals.get('__name__', '')
-                    if module_name:
-                        handler_name = f"{module_name}.{handler_name}"
-                else:
-                    handler_name = "unknown_handler"
-            finally:
-                # Always delete frame references to prevent reference cycles
-                del frame
-
-        if handler_name:
-            self._last_message_times[handler_name] = datetime.now()
-            logger.info(f"Handler {handler_name} called at {self._last_message_times[handler_name]}")
-        else:
-            logger.warning("Handler name is None, unable to track call time")
-
-    async def monitor_consumer_health(self) -> None:
-        """Monitor consumer health periodically"""
-        while True:
-            now = datetime.now()
-            for handler_name, last_time in self._last_message_times.items():
-                if (now - last_time).total_seconds() > 60:  # No messages for 1 minute
-                    logger.warning(
-                        f"Consumer {handler_name} hasn't received messages for {(now - last_time).total_seconds()} seconds"
-                    )
-
-            await asyncio.sleep(30)  # Check every 30 seconds
+        return [(EventMiddleware, [], {})]
 
     # Start the monitor in on_startup
     async def on_startup(self, app: "StufioAPI") -> None:
         """Called when the application starts up."""
+
         from .patches import apply_faststream_patches
 
         # Apply FastStream patches before starting Kafka
         apply_faststream_patches()
 
-        # Start health monitoring
-        # asyncio.create_task(self.monitor_consumer_health())
-
         # Call parent method for Kafka consumer registration
         await super().on_startup(app)
+
+        consumer_registry.register_with_app(app)
 
     async def on_shutdown(self, app: "StufioAPI") -> None:
         """Called when the application shuts down."""
         try:
-            # First try normal shutdown with timeout
-            import asyncio
-
             # Set a timeout for the normal shutdown
             try:
                 await asyncio.wait_for(self.stop_kafka(app), timeout=10.0)
@@ -232,7 +239,6 @@ class EventsModule(ModuleInterface, KafkaModuleMixin):
             # Then apply the force shutdown as a backup
             try:
                 from .consumers.kafka import force_shutdown_kafka
-
                 await force_shutdown_kafka()
             except Exception as e:
                 logger.error(f"Error during forced Kafka shutdown: {e}", exc_info=True)

@@ -1,10 +1,18 @@
 from typing import Dict, Any, Optional, Callable, Type, Union
 
 from pydantic import BaseModel
-from stufio.modules.events.schemas.messages import get_message_class
-from .schemas import EventMessage, Entity, Actor, EventDefinition, ActorType, BaseEventMessage, BaseEventPayload
+from ..schemas import (
+    get_message_class,
+    EventMessage,
+    Entity,
+    Actor,
+    EventDefinition,
+    ActorType,
+    BaseEventMessage,
+    BaseEventPayload,
+)
 from .event_registry import EventRegistry
-from .consumers import get_kafka_broker
+from ..consumers import get_kafka_broker
 import asyncio
 import logging
 import time
@@ -52,6 +60,7 @@ class EventBus:
         correlation_id: Optional[str] = None,
         metrics: Optional[Dict[str, Any]] = None,
         payload_class: Optional[Type[BaseEventPayload]] = None,  # Added parameter
+        custom_headers: Optional[Dict[str, str]] = None,  # Added parameter
     ) -> BaseEventMessage:
         """Publish an event using an EventDefinition class."""
         # Get event definition attributes
@@ -114,7 +123,8 @@ class EventBus:
             metrics=metrics,
             message_class=message_class,  # Use the message class from the definition
             custom_topic=custom_topic,        # Pass custom topic
-            is_high_volume=is_high_volume     # Pass high volume flag
+            is_high_volume=is_high_volume,     # Pass high volume flag
+            custom_headers=custom_headers  # Pass custom headers
         )
 
     async def publish(
@@ -129,7 +139,8 @@ class EventBus:
         metrics: Optional[Dict[str, Any]] = None,
         message_class: Type[BaseEventMessage] = BaseEventMessage,
         custom_topic: Optional[str] = None,
-        is_high_volume: bool = False
+        is_high_volume: bool = False,
+        custom_headers: Optional[Dict[str, str]] = None  # Added parameter
     ) -> BaseEventMessage:
         """Publish an event to Kafka and store in Clickhouse."""
         start_time = time.time()
@@ -150,7 +161,7 @@ class EventBus:
         corr_id = uuid.UUID(correlation_id) if correlation_id else uuid.uuid4()
 
         # Get the right message and payload classes for this event type
-        event_name = f"{entity_type}.{action}"
+        # event_name = f"{entity_type}.{action}"  
 
         # Create the typed event message
         event = message_class(
@@ -183,6 +194,10 @@ class EventBus:
         # Add trace context if available
         if correlation_id:
             kafka_headers["correlation_id"] = str(corr_id)  # Don't encode
+
+        # Add custom headers if provided
+        if custom_headers:
+            kafka_headers.update(custom_headers)
 
         # Generate proper key for partitioning
         key_bytes = f"{entity_type}.{entity_id}".encode('utf-8') if entity_id else entity_type.encode('utf-8')

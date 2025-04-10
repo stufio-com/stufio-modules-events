@@ -59,7 +59,7 @@ settings_registry.register_subgroup(
 # Register settings
 settings_registry.register_setting(
     SettingMetadata(
-        key="EVENT_PROCESSING_CONCURRENCY",
+        key="events_EVENT_PROCESSING_CONCURRENCY",
         label="Event Processing Concurrency",
         description="Number of concurrent event processors",
         group="events",
@@ -74,7 +74,7 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="EVENT_RETRY_ATTEMPTS",
+        key="events_EVENT_RETRY_ATTEMPTS",
         label="Event Retry Attempts",
         description="Number of retry attempts for failed events",
         group="events",
@@ -89,7 +89,7 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="EVENT_RETRY_DELAY_SECONDS",
+        key="events_EVENT_RETRY_DELAY_SECONDS",
         label="Event Retry Delay (seconds)",
         description="Delay between retry attempts for failed events",
         group="events",
@@ -105,7 +105,7 @@ settings_registry.register_setting(
 
 settings_registry.register_setting(
     SettingMetadata(
-        key="KAFKA_ENABLED",
+        key="events_KAFKA_ENABLED",
         label="Enable Kafka",
         description="Enable Kafka for event processing",
         group="events",
@@ -118,9 +118,8 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="KAFKA_BOOTSTRAP_SERVERS",
+        key="events_KAFKA_BOOTSTRAP_SERVERS",
         label="Kafka Bootstrap Servers",
-        
         description="Comma-separated list of Kafka bootstrap servers",
         group="events",
         subgroup="kafka",
@@ -133,7 +132,7 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="KAFKA_TOPIC_PREFIX",
+        key="events_KAFKA_TOPIC_PREFIX",
         label="Kafka Topic Prefix",
         description="Prefix for Kafka topics",
         group="events",
@@ -143,12 +142,11 @@ settings_registry.register_setting(
         module="events",
         default="stufio.events",
         placeholder="stufio.events",
-        
     )
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="KAFKA_GROUP_ID",
+        key="events_KAFKA_GROUP_ID",
         label="Kafka Group ID",
         description="Kafka consumer group ID",
         group="events",
@@ -162,7 +160,7 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="WEBHOOK_ENABLED",
+        key="events_WEBHOOK_ENABLED",
         label="Enable Webhook",
         description="Enable HTTP webhook for event processing",
         group="events",
@@ -175,8 +173,7 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="WEBHOOK_TIMEOUT_SECONDS",
-        
+        key="events_WEBHOOK_TIMEOUT_SECONDS",
         label="Webhook Timeout (seconds)",
         description="Timeout for webhook requests in seconds",
         group="events",
@@ -191,7 +188,7 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="WEBHOOK_MAX_RETRIES",
+        key="events_WEBHOOK_MAX_RETRIES",
         label="Webhook Max Retries",
         description="Maximum number of retries for webhook requests",
         group="events",
@@ -206,7 +203,7 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="CLICKHOUSE_ENABLED",
+        key="events_CLICKHOUSE_ENABLED",
         label="Enable Clickhouse",
         description="Enable Clickhouse for event logging",
         group="events",
@@ -219,7 +216,7 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="CLICKHOUSE_EVENT_LOGS_TTL_DAYS",
+        key="events_CLICKHOUSE_EVENT_LOGS_TTL_DAYS",
         label="Clickhouse Event Logs TTL (days)",
         description="Time-to-live for event logs in Clickhouse",
         group="events",
@@ -234,7 +231,7 @@ settings_registry.register_setting(
 )
 settings_registry.register_setting(
     SettingMetadata(
-        key="COLLECT_METRICS",
+        key="events_COLLECT_METRICS",
         label="Collect Metrics",
         description="Enable collection of metrics for event processing",
         group="events",

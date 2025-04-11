@@ -210,17 +210,17 @@ class EventsModule(KafkaModuleMixin, EventsModuleMixin, ModuleInterface):
         # debugpy.listen(("0.0.0.0", 5678))
         # logger.error("Waiting for debugger to attach...")
         # debugpy.wait_for_client()
-        
+
         return [(EventMiddleware, [], {})]
 
     # Start the monitor in on_startup
     async def on_startup(self, app: "StufioAPI") -> None:
         """Called when the application starts up."""
 
-        from .patches import apply_faststream_patches
+        from .patches import apply_all_patches
 
         # Apply FastStream patches before starting Kafka
-        apply_faststream_patches()
+        apply_all_patches()
 
         # Call parent method for Kafka consumer registration
         await super().on_startup(app)

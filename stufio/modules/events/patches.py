@@ -1,21 +1,19 @@
 import logging
-import asyncio
-import inspect
 from typing import Any, Dict, List, Set
 from contextlib import AsyncExitStack
-from itertools import chain
 
 # Import the classes we need to patch
 from faststream.broker.subscriber.usecase import SubscriberUsecase
 from faststream.broker.response import ensure_response
 from faststream.utils.context.repository import context
-from faststream.exceptions import SubscriberNotFound
 
 logger = logging.getLogger(__name__)
 
 # Track patched instances to avoid duplicate patching
 _PATCHED_INSTANCES: Set[int] = set()
 _PATCH_APPLIED = False
+original_process_message = None
+
 
 # Define the improved process_message method
 async def improved_process_message(self, msg: Any) -> Any:
@@ -154,7 +152,7 @@ async def improved_process_message(self, msg: Any) -> Any:
 
 def apply_faststream_patches():
     """Apply patches to FastStream to improve message handling."""
-    global _PATCH_APPLIED
+    global _PATCH_APPLIED, original_process_message
     
     # Only patch once
     if _PATCH_APPLIED:
@@ -199,7 +197,10 @@ def patch_existing_instances():
 
 def reset_faststream_patches():
     """Reset FastStream patches if needed."""
-    global _PATCH_APPLIED
+    global _PATCH_APPLIED, original_process_message
+    if not original_process_message:
+        logger.info("No patches to reset")
+        return
     
     if not _PATCH_APPLIED:
         return
@@ -212,3 +213,9 @@ def reset_faststream_patches():
     
     _PATCH_APPLIED = False
     logger.info("Reset FastStream patches")
+
+
+def apply_all_patches():
+    """Apply all patches to improve FastStream behavior."""
+    # Apply FastStream message handling patches
+    apply_faststream_patches()

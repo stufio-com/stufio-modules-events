@@ -1,6 +1,8 @@
 import logging
 from typing import Dict, Any
 from fastapi import FastAPI
+from faststream.asyncapi.site import get_asyncapi_html, _Handler
+from stufio.modules.events.consumers.asyncapi import get_patched_app_schema
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,8 @@ class ConsumerRegistry:
 
     def register_with_app(self, app: FastAPI) -> None:
         """Register all consumers with the FastAPI app."""
+        from stufio.modules.events.consumers.asyncapi_init import initialize_asyncapi_docs
+
         for key, router in self._registered_routers.items():
             try:
                 if router and hasattr(router, "include_in_schema") and router.include_in_schema:
@@ -68,18 +72,18 @@ class ConsumerRegistry:
 
                     # AsyncAPI documentation if available
                     if hasattr(router, 'docs_router') and router.docs_router:
+                        # Initialize AsyncAPI docs
                         logger.info(f"Adding AsyncAPI documentation for {key}")
                         try:
-                            # Use patched schema generator
-                            from stufio.modules.events.consumers.asyncapi import get_patched_app_schema
-                            router.schema = get_patched_app_schema(router)
+                            schema = get_patched_app_schema(router)
+                            initialize_asyncapi_docs(app, schema)
                         except Exception as e:
-                            logger.error(f"Error generating AsyncAPI schema for {key}: {e}")
+                            logger.error(f"Failed to initialize AsyncAPI docs: {e}", exc_info=True)
+                            continue
 
-                        # Add the docs router to the app
-                        app.include_router(router.docs_router)
             except Exception as e:
                 logger.error(f"Failed to register Kafka router {key}: {e}", exc_info=True)
+
 
 # Global singleton instance
 consumer_registry = ConsumerRegistry()

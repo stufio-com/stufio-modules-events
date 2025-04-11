@@ -5,13 +5,14 @@ from faststream.asyncapi.schema import Channel, ChannelBinding, CorrelationId, M
 from faststream.asyncapi.schema.bindings import kafka
 from faststream.asyncapi.utils import resolve_payloads
 from faststream.kafka.subscriber.asyncapi import AsyncAPIDefaultSubscriber
-from faststream.kafka.broker.registrator import KafkaRegistrator 
+from faststream.kafka.broker.registrator import KafkaRegistrator
 from faststream.broker.types import Filter, MsgType
 from faststream.broker.utils import default_filter
 from ..schemas.base import MessageHeader
 from ..schemas.event_definition import EventDefinition
 from stufio.core.config import get_settings
 from faststream.asyncapi.generate import get_app_schema as original_get_app_schema
+from .publisher_registry import get_publisher_channels
 
 settings = get_settings()
 
@@ -169,10 +170,10 @@ def patched_get_schema(self):
     #     f"{next(iter(self.topics), '')}:{self.call_name}",  # Single topic format
     #     self.call_name,  # Just function name
     # ]
-    
+
 
     channels = {}
-    
+
     if self.calls:
         for call in self.calls:
             call_subscriber_names = []
@@ -200,30 +201,30 @@ def extract_payload_class(func):
     try:
         # Get type hints from the function
         hints = get_type_hints(func)
-        
+
         # Get the first parameter (usually 'event')
         signature = inspect.signature(func)
         if not signature.parameters:
             return None
-        
+
         # Get the first parameter name
         first_param_name = next(iter(signature.parameters))
-        if first_param_name not in hints:
+        if (first_param_name not in hints):
             return None
-            
+
         # Get the parameter type
         param_type = hints[first_param_name]
-        
+
         # Check if it's a generic type (like BaseEventMessage[SomePayload])
         origin = get_origin(param_type)
         if origin is None:
             return None
-            
+
         # Get the arguments of the generic type
         args = get_args(param_type)
         if not args:
             return None
-            
+
         # The last argument is typically the payload type
         payload_class = args[-1]
         logger.debug(f"Extracted payload class: {payload_class}")
@@ -260,14 +261,14 @@ def stufio_subscriber(
     heartbeat_interval_ms = getattr(settings, "events_KAFKA_HEARTBEAT_INTERVAL_MS", 20000)
     auto_commit_interval_ms = getattr(settings, "events_KAFKA_AUTO_COMMIT_INTERVAL_MS", 5000)
     auto_offset_reset = getattr(settings, "events_KAFKA_AUTO_OFFSET_RESET", "earliest")
-    
+
     # Set these parameters directly in kwargs
     kwargs["max_poll_interval_ms"] = max_poll_interval_ms
     kwargs["session_timeout_ms"] = session_timeout_ms
     kwargs["heartbeat_interval_ms"] = heartbeat_interval_ms
     kwargs["auto_commit_interval_ms"] = auto_commit_interval_ms
     kwargs["auto_offset_reset"] = auto_offset_reset
-    
+
     # Set other broker parameters
     if title:
         kwargs["title"] = title
@@ -391,7 +392,7 @@ def stufio_event_subscriber(
         if group_id is None:
             # group_id = f"{settings.events_KAFKA_GROUP_ID}.{event.entity_type}.{event.action}:{func_name}"
             # Use a more generic group ID
-            group_id = f"{settings.events_KAFKA_GROUP_ID}.{event.entity_type}.{event.action}" 
+            group_id = f"{settings.events_KAFKA_GROUP_ID}.{event.entity_type}.{event.action}"
 
         # Default title from event class
         if title is None:
@@ -427,18 +428,43 @@ def stufio_event_subscriber(
     return decorator
 
 
+# Add a global registry for top-level schemas
+top_level_schemas_registry: Dict[str, Any] = {}
+
+# Then modify the get_patched_app_schema function to include these schemas
 def get_patched_app_schema(router):
     """
     Get AsyncAPI schema with our custom patches applied.
-    
+
     This ensures our channel registry is used for schema generation.
     """
     # Force applying our patch if not already applied
     if AsyncAPIDefaultSubscriber.get_schema != patched_get_schema:
         AsyncAPIDefaultSubscriber.get_schema = patched_get_schema
-        
+
     # Log registered channels for debugging
     logger.info(f"Registered channels: {list(channel_registry.keys())}")
-    
+
     # Now generate the schema using the original function
-    return original_get_app_schema(router)
+    schema = original_get_app_schema(router)
+
+    # Add publisher channels to the schema
+    publisher_channels = get_publisher_channels()
+
+    # Merge channels
+    if hasattr(schema, "channels"):
+        schema.channels.update(publisher_channels)
+
+    # Add our top-level schemas to the components.schemas section
+    if not hasattr(schema, "components"):
+        from faststream.asyncapi.schema import Components
+        schema.components = Components()
+
+    if not hasattr(schema.components, "schemas"):
+        schema.components.schemas = {}
+
+    # Merge collected top-level schemas
+    schema.components.schemas.update(top_level_schemas_registry)
+
+    logger.warning(f"Generated AsyncAPI schema with {len(schema.channels)} channels")
+    return schema

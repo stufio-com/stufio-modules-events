@@ -22,6 +22,7 @@ class EventsSettings(ModuleSettings):
     KAFKA_BOOTSTRAP_SERVERS: Union[str, List[str]] = ["kafka:9092"]
     KAFKA_TOPIC_PREFIX: str = "stufio.events"
     ASYNCAPI_PREFIX: str = "stufio.events"
+    ASYNCAPI_DOCS_ENABLED: bool = True
     KAFKA_GROUP_ID: str = "stufio-events"
 
     # Kafka consumer settings

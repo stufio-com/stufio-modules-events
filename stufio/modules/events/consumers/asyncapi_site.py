@@ -1,11 +1,9 @@
-from functools import partial
-from http import server
-from typing import TYPE_CHECKING, Any, Dict
-from urllib.parse import parse_qs, urlparse
+from typing import TYPE_CHECKING
 import logging
 
 from faststream._compat import json_dumps
-from faststream.log import logger
+import logging
+
 
 if TYPE_CHECKING:
     from faststream.asyncapi.schema import Schema
@@ -53,13 +51,6 @@ def get_asyncapi_html(
                 "showServers": "byDefault",
                 "showOperations": "byDefault",
             },
-            # Add your custom logo configuration
-            "logo": {
-                "src": "https://example.com/your-logo.png",  # Replace with your logo URL
-                "altText": "Stufio Events API",
-                "backgroundColor": "#FFFFFF",
-                "href": "https://your-site.com"
-            }
         },
     }
 
@@ -118,63 +109,3 @@ def get_asyncapi_html(
     """
     )
 
-
-class CustomHandler(server.BaseHTTPRequestHandler):
-    def __init__(
-        self,
-        *args: Any,
-        schema: "Schema",
-        **kwargs: Any,
-    ) -> None:
-        self.schema = schema
-        super().__init__(*args, **kwargs)
-
-    def get_query_params(self) -> Dict[str, bool]:
-        return {
-            i: _str_to_bool(next(iter(j))) if j else False
-            for i, j in parse_qs(urlparse(self.path).query).items()
-        }
-
-    def do_GET(self) -> None:  # noqa: N802
-        """Serve a GET request."""
-        query_dict = self.get_query_params()
-
-        encoding = "utf-8"
-        html = get_asyncapi_html(
-            self.schema,
-            sidebar=query_dict.get("sidebar", True),
-            info=query_dict.get("info", True),
-            servers=query_dict.get("servers", True),
-            operations=query_dict.get("operations", True),
-            messages=query_dict.get("messages", True),
-            schemas=query_dict.get("schemas", True),
-            errors=query_dict.get("errors", True),
-            expand_message_examples=query_dict.get("expandMessageExamples", True),
-            title=self.schema.info.title,
-        )
-        body = html.encode(encoding=encoding)
-
-        self.send_response(200)
-        self.send_header("content-length", str(len(body)))
-        self.send_header("content-type", f"text/html; charset={encoding}")
-        self.end_headers()
-        self.wfile.write(body)
-
-
-def serve_app(
-    schema: "Schema",
-    host: str,
-    port: int,
-) -> None:
-    """Serve the HTTPServer with AsyncAPI schema."""
-    logger.info(f"Custom AsyncAPI HTTPServer running on http://{host}:{port} (Press CTRL+C to quit)")
-    logger.warning("Please, do not use it in production.")
-
-    server.HTTPServer(
-        (host, port),
-        partial(CustomHandler, schema=schema),
-    ).serve_forever()
-
-
-def _str_to_bool(v: str) -> bool:
-    return v.lower() in ("1", "t", "true", "y", "yes")

@@ -11,6 +11,7 @@ from .consumers import get_kafka_router, get_kafka_broker
 from .consumers.asyncapi import stufio_event_subscriber
 from .consumers.topic_initializer import initialize_kafka_topics
 from .services.event_bus import get_event_bus
+from .services.publisher_registry import register_publisher_channel
 
 
 # Import events and register them
@@ -55,6 +56,7 @@ __all__ = [
     "stufio_event_subscriber",
     # New registration functions
     "register_module_events",
+    "register_publisher_channel",
     # Exported events
     "UserCreatedEvent",
     "UserLoginEvent",

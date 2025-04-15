@@ -1,3 +1,4 @@
+import inspect
 from typing import Dict, List, Optional, Callable, Any, Type, Set
 from ..schemas.event import EventMessage
 from ..schemas.event_definition import EventDefinition
@@ -183,6 +184,41 @@ class EventRegistry:
         logger.debug(f"Registered HTTP subscription {sub_id} for event {key} to {callback_url}")
         
         return sub_id
+
+    def discover_events_from_modules(self) -> List[Type[EventDefinition]]:
+        """
+        Discover events from all loaded modules.
+        This helps ensure the registry contains events from all modules.
+        """
+        from stufio.core.module_registry import registry
+        
+        discovered_events = []
+        
+        # Go through all registered modules
+        for module_name, module in registry.modules.items():
+            try:
+                # Try to get events from module's __init__
+                if hasattr(module, 'EVENTS'):
+                    events = getattr(module, 'EVENTS')
+                    for event in events:
+                        if issubclass(event, EventDefinition):
+                            self.register_event(event, module_name)
+                            discovered_events.append(event)
+                
+                # Alternative: look for events.py in the module
+                events_module = module.get_submodule('events')
+                if events_module:
+                    for name, obj in inspect.getmembers(events_module):
+                        if (inspect.isclass(obj) and issubclass(obj, EventDefinition) 
+                            and obj != EventDefinition):
+                            self.register_event(obj, module_name)
+                            discovered_events.append(obj)
+            
+            except Exception as e:
+                logger.error(f"Error discovering events from module {module_name}: {e}")
+                
+        logger.info(f"Discovered {len(discovered_events)} events from modules")
+        return discovered_events
 
 # Global singleton instance
 event_registry = EventRegistry()

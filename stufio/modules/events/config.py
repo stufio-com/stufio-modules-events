@@ -25,6 +25,13 @@ class EventsSettings(ModuleSettings):
     ASYNCAPI_DOCS_ENABLED: bool = True
     KAFKA_GROUP_ID: str = "stufio-events"
 
+    # Kafka topic settings
+    KAFKA_DEFAULT_PARTITIONS: int = 3
+    KAFKA_DEFAULT_HL_PARTITIONS: int = 9
+    KAFKA_DEFAULT_REPLICATION_FACTOR: int = 1
+    KAFKA_RETENTION_MS: int = 604800000  # 7 days
+    KAFKA_SEGMENT_BYTES: int = 1073741824  # 1 GB
+
     # Kafka consumer settings
     KAFKA_AUTO_OFFSET_RESET: str = "earliest"
     KAFKA_ENABLE_AUTO_COMMIT: bool = True
@@ -37,6 +44,12 @@ class EventsSettings(ModuleSettings):
     KAFKA_MAX_POLL_INTERVAL_MS: int = 300000  # 5 minutes
     KAFKA_SESSION_TIMEOUT_MS: int = 60000  # 1 minute
     KAFKA_HEARTBEAT_INTERVAL_MS: int = 20000  # 20 seconds
+
+    # ClickHouse Kafka integration settings
+    KAFKA_TOPIC_EXPIRED: str = "nameniac_scrape_expired"
+    KAFKA_TOPIC_WHOIS: str = "nameniac_whois"
+    KAFKA_GROUP_EXPIRED_CLICKHOUSE: str = "consumer-ch-scrapeexpired"
+    KAFKA_GROUP_WHOIS_CLICKHOUSE: str = "consumer-ch-whois"
 
     @field_validator('KAFKA_BOOTSTRAP_SERVERS')
     @classmethod

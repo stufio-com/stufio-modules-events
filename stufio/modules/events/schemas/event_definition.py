@@ -1,6 +1,5 @@
 from typing import Dict, Any, Optional, Type, ClassVar, List, Union, TypeVar, Generic, get_args, get_origin
 import logging
-import inspect
 from httpx import get
 from pydantic import BaseModel, validator
 from stufio.core.config import get_settings

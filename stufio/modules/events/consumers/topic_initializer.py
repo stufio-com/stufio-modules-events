@@ -87,7 +87,7 @@ class KafkaTopicInitializer:
 
             # Determine partitions
             partitions = event_attrs.get(
-                "partitions", getattr(settings, "events_KAFKA_DEFAULT_PARTITIONS", 9)
+                "partitions", getattr(settings, "events_KAFKA_DEFAULT_PARTITIONS", 3)
             )
             if is_high_volume and not event_attrs.get('partitions'):
                 partitions = getattr(
@@ -98,14 +98,20 @@ class KafkaTopicInitializer:
             return TopicConfig(
                 name=topic_name,
                 num_partitions=partitions,
-                replication_factor=getattr(settings, "events_KAFKA_REPLICATION_FACTOR", 1),
+                replication_factor=getattr(
+                    settings, "events_DEFAULT_REPLICATION_FACTOR", 1
+                ),
                 config={
                     "cleanup.policy": "delete",
-                    "retention.ms": str(getattr(settings, "events_KAFKA_RETENTION_MS", 604800000)),  # 7 days
-                    "segment.bytes": str(getattr(settings, "events_KAFKA_SEGMENT_BYTES", 1073741824)),  # 1GB
+                    "retention.ms": str(
+                        getattr(settings, "events_KAFKA_RETENTION_MS", 604800000)
+                    ),  # 7 days
+                    "segment.bytes": str(
+                        getattr(settings, "events_KAFKA_SEGMENT_BYTES", 1073741824)
+                    ),  # 1GB
                 },
-                description=event_attrs.get('description'),
-                source_event=event_class.__name__
+                description=event_attrs.get("description"),
+                source_event=event_class.__name__,
             )
         except Exception as e:
             logger.error(f"Error extracting topic from {event_class.__name__}: {e}", exc_info=True)
@@ -114,11 +120,14 @@ class KafkaTopicInitializer:
     def discover_events_from_registry(self) -> List[Type[EventDefinition]]:
         """Discover all event definition classes from the event registry."""
         from ..services.event_registry import event_registry
-        
+
+        # First make sure we've discovered events from all modules
+        event_registry.discover_events_from_modules()
+
         # Get all registered events from the registry
         all_events = list(event_registry.registered_events.values())
         logger.info(f"Discovered {len(all_events)} events from registry")
-        
+
         return all_events
 
     async def create_topic(self, config: TopicConfig) -> bool:

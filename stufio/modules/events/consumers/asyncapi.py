@@ -12,7 +12,7 @@ from ..schemas.base import MessageHeader
 from ..schemas.event_definition import EventDefinition
 from stufio.core.config import get_settings
 from faststream.asyncapi.generate import get_app_schema as original_get_app_schema
-from .publisher_registry import get_publisher_channels
+from ..services.publisher_registry import get_publisher_channels
 
 settings = get_settings()
 
@@ -22,13 +22,6 @@ channel_registry: Dict[str, Dict[str, Any]] = {}
 
 import logging
 logger = logging.getLogger(__name__)
-
-# import debugpy
-
-# # # Allow connections to the debugger from any host
-# debugpy.listen(("0.0.0.0", 5678))
-# logger.error("Waiting for debugger to attach...")
-# debugpy.wait_for_client()
 
 def register_channel_info(subscriber_name: str, channel_info: Dict[str, Any]) -> None:
     """Register channel information for a subscriber"""
@@ -433,11 +426,7 @@ top_level_schemas_registry: Dict[str, Any] = {}
 
 # Then modify the get_patched_app_schema function to include these schemas
 def get_patched_app_schema(router):
-    """
-    Get AsyncAPI schema with our custom patches applied.
-
-    This ensures our channel registry is used for schema generation.
-    """
+    """Get AsyncAPI schema with our custom patches applied."""
     # Force applying our patch if not already applied
     if AsyncAPIDefaultSubscriber.get_schema != patched_get_schema:
         AsyncAPIDefaultSubscriber.get_schema = patched_get_schema
@@ -445,9 +434,30 @@ def get_patched_app_schema(router):
     # Log registered channels for debugging
     logger.info(f"Registered channels: {list(channel_registry.keys())}")
 
-    # Now generate the schema using the original function
     schema = original_get_app_schema(router)
-
+    
+    # Add publisher channels
+    publisher_channels = get_publisher_channels()
+    
+    # Get the message components that were created
+    message_components = getattr(get_patched_app_schema, "message_components", {})
+    
+    # Merge channels
+    if hasattr(schema, "channels"):
+        schema.channels.update(publisher_channels)
+    
+    # Make sure components exist
+    if not hasattr(schema, "components"):
+        from faststream.asyncapi.schema import Components
+        schema.components = Components()
+    
+    # Make sure components.messages exists
+    if not hasattr(schema.components, "messages"):
+        schema.components.messages = {}
+    
+    # Add message components to components.messages
+    schema.components.messages.update(message_components)
+    
     # Add publisher channels to the schema
     publisher_channels = get_publisher_channels()
 

@@ -1,8 +1,7 @@
 import logging
 from typing import Dict, Any
 from fastapi import FastAPI
-from faststream.asyncapi.site import get_asyncapi_html, _Handler
-from stufio.modules.events.consumers.asyncapi import get_patched_app_schema
+from ..consumers.asyncapi import get_patched_app_schema
 
 logger = logging.getLogger(__name__)
 

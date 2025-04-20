@@ -1,22 +1,13 @@
 import logging
 from typing import Dict, List, Set, Type, Optional, Any
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-from pydantic import BaseModel
 
 from stufio.core.config import get_settings
-from stufio.modules.events.schemas.event_definition import EventDefinition
+from ..schemas.event_definition import EventDefinition
+from ..schemas.topic import TopicConfig
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-
-class TopicConfig(BaseModel):
-    """Configuration for a Kafka topic."""
-    name: str
-    num_partitions: int = 1
-    replication_factor: int = 1
-    config: Dict[str, str] = {}
-    description: Optional[str] = None
-    source_event: Optional[str] = None
 
 class KafkaTopicInitializer:
     """Initializes Kafka topics for the application based on event definitions."""
@@ -94,22 +85,50 @@ class KafkaTopicInitializer:
                     settings, "events_KAFKA_DEFAULT_HL_PARTITIONS", 9
                 )  # Default higher partition count for high-volume events
 
+            # Get retention settings from event definition
+            retention_days = event_attrs.get('retention_days')
+            retention_ms = None
+            if retention_days:
+                retention_ms = retention_days * 24 * 60 * 60 * 1000
+            else:
+                retention_ms = getattr(settings, "events_KAFKA_RETENTION_MS", 604800000)  # Default 7 days
+
+            # Determine cleanup policy
+            require_compaction = event_attrs.get('require_compaction', False)
+            cleanup_policy = "compact,delete" if require_compaction else "delete"
+
+            # Set size-based retention if specified
+            retention_bytes = event_attrs.get(
+                'retention_bytes',
+                getattr(settings, "events_KAFKA_RETENTION_BYTES", None)
+            )
+
+            # Build config dict
+            config = {
+                "cleanup.policy": cleanup_policy,
+                "retention.ms": str(retention_ms),
+                "segment.bytes": str(getattr(settings, "events_KAFKA_SEGMENT_BYTES", 1073741824)),
+            }
+
+            # Add optional size-based retention
+            if retention_bytes:
+                config["retention.bytes"] = str(retention_bytes)
+
+            # Add compaction-specific settings if needed
+            if require_compaction:
+                config["min.compaction.lag.ms"] = str(
+                    getattr(settings, "events_KAFKA_MIN_COMPACTION_LAG_MS", 0)
+                )
+                config["max.compaction.lag.ms"] = str(
+                    getattr(settings, "events_KAFKA_MAX_COMPACTION_LAG_MS", 9223372036854775807)
+                )
+
             # Create topic config
             return TopicConfig(
                 name=topic_name,
                 num_partitions=partitions,
-                replication_factor=getattr(
-                    settings, "events_DEFAULT_REPLICATION_FACTOR", 1
-                ),
-                config={
-                    "cleanup.policy": "delete",
-                    "retention.ms": str(
-                        getattr(settings, "events_KAFKA_RETENTION_MS", 604800000)
-                    ),  # 7 days
-                    "segment.bytes": str(
-                        getattr(settings, "events_KAFKA_SEGMENT_BYTES", 1073741824)
-                    ),  # 1GB
-                },
+                replication_factor=getattr(settings, "events_DEFAULT_REPLICATION_FACTOR", 1),
+                config=config,
                 description=event_attrs.get("description"),
                 source_event=event_class.__name__,
             )

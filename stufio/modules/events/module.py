@@ -1,7 +1,6 @@
 from typing import List, Any, Tuple
 import logging
 import asyncio
-from datetime import datetime
 import inspect
 import importlib
 
@@ -45,9 +44,7 @@ class KafkaModuleMixin:
             app: StufioAPI instance
             module_name: The module name (e.g., 'events', 'activity')
         """
-        if getattr(app.app_settings, "events_KAFKA_ENABLED", False) and getattr(
-            app.app_settings, "events_APP_CONSUME_ROUTES", False
-        ):
+        if getattr(app.app_settings, "events_KAFKA_ENABLED", False):
             try:
                 logger.info(f"Registering Kafka consumers for {module_name} module")
 
@@ -203,13 +200,6 @@ class EventsModule(KafkaModuleMixin, EventsModuleMixin, ModuleInterface):
         Returns:
             List of (middleware_class, args, kwargs) tuples
         """
-
-        # import debugpy
-
-        # # Allow connections to the debugger from any host
-        # debugpy.listen(("0.0.0.0", 5678))
-        # logger.error("Waiting for debugger to attach...")
-        # debugpy.wait_for_client()
 
         return [(EventMiddleware, [], {})]
 

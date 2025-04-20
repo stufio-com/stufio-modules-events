@@ -2,6 +2,7 @@
 Migration to create event_logs table in Clickhouse
 """
 from stufio.core.migrations.base import ClickhouseMigrationScript
+from stufio.db.clickhouse import get_database_from_dsn
 
 class CreateEventLogsTable(ClickhouseMigrationScript):
     name = "create_event_logs_table"
@@ -10,10 +11,13 @@ class CreateEventLogsTable(ClickhouseMigrationScript):
     order = 10
 
     async def run(self, db):
+
+        db_name = get_database_from_dsn()
+
         # Create event_logs table
         await db.command(
-            """
-        CREATE TABLE IF NOT EXISTS event_logs (
+            f"""
+        CREATE TABLE IF NOT EXISTS `{db_name}`.`event_logs` (
             id UUID DEFAULT generateUUIDv4(),
             event_id UUID NOT NULL,
             correlation_id UUID NULL,
@@ -39,8 +43,9 @@ class CreateEventLogsTable(ClickhouseMigrationScript):
         )
 
         # Create time-based views/aggregations
-        await db.command("""
-        CREATE MATERIALIZED VIEW IF NOT EXISTS event_logs_daily
+        await db.command(
+            f"""
+        CREATE MATERIALIZED VIEW IF NOT EXISTS `{db_name}`.`event_logs_daily`
         ENGINE = SummingMergeTree
         ORDER BY (event_date, entity_type, action)
         POPULATE AS
@@ -54,4 +59,5 @@ class CreateEventLogsTable(ClickhouseMigrationScript):
             max(JSONExtractInt(metrics, 'processing_time_ms')) as max_processing_time_ms
         FROM event_logs
         GROUP BY event_date, entity_type, action
-        """)
+        """
+        )

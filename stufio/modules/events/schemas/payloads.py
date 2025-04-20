@@ -95,3 +95,17 @@ class SystemErrorPayload(BaseEventPayload):
     error_message: str
     stacktrace: Optional[str] = None
     severity: str
+
+class APIRequestPayload(BaseEventPayload):
+    """Payload for API request events."""
+    method: str = Field(..., description="HTTP method used")
+    path: str = Field(..., description="Request path")
+    status_code: int = Field(..., description="HTTP status code")
+    query_params: Dict[str, Any] = Field(default_factory=dict, description="Query parameters")
+    headers: Dict[str, str] = Field(default_factory=dict, description="HTTP headers (sanitized)")
+    error: Optional[Dict[str, Any]] = Field(None, description="Error details if status code >= 400")
+    duration_ms: int = Field(..., description="Request processing time in milliseconds")
+    response_size_bytes: Optional[int] = Field(None, description="Size of response in bytes")
+    user_id: str = Field(..., description="User ID or 'anonymous'")
+    user_agent: Optional[str] = Field(None, description="User agent string")
+    remote_ip: Optional[str] = Field(None, description="Remote IP address")

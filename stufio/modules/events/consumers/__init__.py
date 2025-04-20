@@ -46,5 +46,11 @@ def _register_module_consumers():
 # Register consumers
 _register_module_consumers()
 
-# Lazy load modules
-from . import clickhouse_event_log
+
+from stufio.core.config import get_settings
+
+settings = get_settings()
+
+if settings.events_APP_CONSUME_ROUTES:
+    # Lazy load modules
+    from . import clickhouse_event_log

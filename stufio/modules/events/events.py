@@ -208,6 +208,7 @@ class APIRequestEvent(EventDefinition[APIRequestPayload]):
     action = "request"
     require_actor = True
     high_volume = True  # Flag for high-volume events
+    retention_days = 3
     description = "Tracks API requests including performance metrics"
     payload_example = {
         "method": "GET",

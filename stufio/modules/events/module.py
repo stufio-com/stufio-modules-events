@@ -8,7 +8,7 @@ from stufio.core.module_registry import ModuleInterface
 from stufio.core.stufioapi import StufioAPI
 from .schemas.event_definition import EventDefinition
 from .api import router
-from .middleware import EventMiddleware
+from .middleware import EventTrackingMiddleware
 from .services.consumer_registry import consumer_registry
 from .__version__ import __version__
 from .helpers import register_module_events
@@ -201,7 +201,7 @@ class EventsModule(KafkaModuleMixin, EventsModuleMixin, ModuleInterface):
             List of (middleware_class, args, kwargs) tuples
         """
 
-        return [(EventMiddleware, [], {})]
+        return [(EventTrackingMiddleware, [], {})]
 
     # Start the monitor in on_startup
     async def on_startup(self, app: "StufioAPI") -> None:

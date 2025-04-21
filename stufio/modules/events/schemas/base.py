@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, UUID4
 
 class ActorType(str, Enum):
     """Type of actor performing an action."""
+    ANONYMOUS = "guest"
     USER = "user"
     ADMIN = "admin"
     SYSTEM = "system"
@@ -24,7 +25,16 @@ class Actor(BaseModel):
 class EventMetrics(BaseModel):
     """Performance metrics for event processing."""
     processing_time_ms: Optional[int] = Field(None, description="Processing time in milliseconds")
-    db_time_ms: Optional[int] = Field(None, description="Database operation time in milliseconds")
+    total_time_ms: Optional[int] = Field(None, description="Total request time in milliseconds")
+    response_size_bytes: Optional[int] = Field(None, description="Size of response in bytes")
+    
+    # Database specific metrics
+    mongodb: Optional[Dict[str, Any]] = Field(None, description="MongoDB operation metrics")
+    clickhouse: Optional[Dict[str, Any]] = Field(None, description="ClickHouse query metrics") 
+    redis: Optional[Dict[str, Any]] = Field(None, description="Redis operation metrics")
+    
+    # Legacy fields
+    db_time_ms: Optional[int] = Field(None, description="Total database operation time in milliseconds")
     api_time_ms: Optional[int] = Field(None, description="External API time in milliseconds")
     queue_time_ms: Optional[int] = Field(None, description="Time spent in queue")
     custom_metrics: Optional[Dict[str, Any]] = Field(None, description="Custom service-specific metrics")

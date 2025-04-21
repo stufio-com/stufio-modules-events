@@ -109,3 +109,4 @@ class APIRequestPayload(BaseEventPayload):
     user_id: str = Field(..., description="User ID or 'anonymous'")
     user_agent: Optional[str] = Field(None, description="User agent string")
     remote_ip: Optional[str] = Field(None, description="Remote IP address")
+    is_authenticated: bool = Field(False, description="Whether the request was authenticated")

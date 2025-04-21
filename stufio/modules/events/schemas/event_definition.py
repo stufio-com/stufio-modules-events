@@ -103,6 +103,9 @@ class EventDefinitionMeta(type):
                     )
                 else:
                     cls._event_attrs["topic"] = topic_prefix
+                    
+        if "retention_days" not in cls._event_attrs:
+            cls._event_attrs["retention_days"] = cls.retention_days
 
         # Add to global registry if it's a concrete class
         if name != "EventDefinition" and name.endswith("Event"):
@@ -128,6 +131,7 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
     topic: ClassVar[Optional[str]] = None  # Custom topic name (overrides default)
     high_volume: ClassVar[bool] = False    # Flag for high-volume events
     partitions: ClassVar[int] = 0          # Custom partition count (0 = use default)
+    retention_days: ClassVar[int] = 0      # Custom retention period (0 = use default)
 
     @classmethod 
     def get_topic_name(cls) -> str:

@@ -4,7 +4,7 @@ from .settings import settings_registry
 from .module import EventsModule, KafkaModuleMixin, EventsModuleMixin
 from .schemas.base import ActorType
 from .schemas.event_definition import EventDefinition
-from .schemas.payloads import BaseEventPayload
+from .schemas.payloads import BaseEventPayload, APIRequestPayload
 from .schemas.messages import BaseEventMessage
 from .helpers import publish_event, subscribe_to_event, register_module_events
 from .consumers import get_kafka_router, get_kafka_broker
@@ -12,7 +12,7 @@ from .consumers.asyncapi import stufio_event_subscriber
 from .consumers.topic_initializer import initialize_kafka_topics
 from .services.event_bus import get_event_bus
 from .services.publisher_registry import register_publisher_channel
-
+from .middleware.base import BaseStufioMiddleware
 
 # Import events and register them
 from .events import (
@@ -29,6 +29,7 @@ from .events import (
     SystemStartupEvent,
     SystemShutdownEvent,
     SystemErrorEvent,
+    APIRequestEvent,
 )
 
 __all__ = [
@@ -44,10 +45,13 @@ __all__ = [
     "EventDefinition",
     "BaseEventPayload",
     "BaseEventMessage",
+    "APIRequestPayload",
     # Exported helper functions
     "publish_event",
     "subscribe_to_event",
     "initialize_kafka_topics",
+    # Middleware
+    "BaseStufioMiddleware",
     # Kafka components
     "get_kafka_router",
     "get_kafka_broker",
@@ -73,4 +77,5 @@ __all__ = [
     "SystemStartupEvent",
     "SystemShutdownEvent",
     "SystemErrorEvent",
+    "APIRequestEvent",
 ]

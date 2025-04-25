@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import List, Dict, Any, Optional
+
+from ..utils.context import TaskContext
 from ..schemas import (
     EventSubscription,
     EventLogResponse,
@@ -16,10 +18,8 @@ async def publish_event(
     request: Request
 ):
     """Publish a new event."""
-    # if not hasattr(request.app.state, "event_bus"):
-    #     raise HTTPException(status_code=500, detail="Event bus not initialized")
-    
     event_bus = get_event_bus()
+
     # Extract required fields
     entity_type = event_data.get("entity", {}).get("type")
     entity_id = event_data.get("entity", {}).get("id")
@@ -27,13 +27,19 @@ async def publish_event(
     actor_type = event_data.get("actor", {}).get("type")
     actor_id = event_data.get("actor", {}).get("id")
     payload = event_data.get("payload")
-    correlation_id = event_data.get("correlation_id")
     metrics = event_data.get("metrics")
-    
+
+    # Get correlation_id from request.state if available, otherwise from event_data or generate new
+    correlation_id = getattr(request.state, "correlation_id", None)
+    if not correlation_id:
+        correlation_id = event_data.get(
+            "correlation_id", str(TaskContext.get_correlation_id())
+        )
+
     # Validate required fields
     if not all([entity_type, entity_id, action, actor_type, actor_id]):
         raise HTTPException(status_code=400, detail="Missing required event fields")
-    
+
     # Publish the event
     event = await event_bus.publish(
         entity_type=entity_type,
@@ -45,7 +51,7 @@ async def publish_event(
         correlation_id=correlation_id,
         metrics=metrics
     )
-    
+
     return {"status": "success", "event_id": str(event.event_id)}
 
 

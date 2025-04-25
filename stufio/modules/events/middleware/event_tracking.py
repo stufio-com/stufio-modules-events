@@ -15,6 +15,7 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 import uuid
 
+from ..utils.context import TaskContext
 from .base import BaseStufioMiddleware
 from ..schemas.base import ActorType
 from ..schemas.payloads import SystemErrorPayload, APIRequestPayload
@@ -43,11 +44,11 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
         self.include_request_body = kwargs.get("include_request_body", False)
         self.include_auth_status = kwargs.get("include_auth_status", True)
         self.track_db_metrics = getattr(settings, "DB_METRICS_ENABLE", False)
-        
+
         # Start metrics collection background task if enabled
         if self.track_db_metrics:
             self._start_metrics_collection()
-    
+
     def _start_metrics_collection(self):
         """Start the database metrics collection if enabled"""
         try:
@@ -79,7 +80,7 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
 
                 # Generate correlation ID
                 correlation_id = getattr(
-                    request.state, "correlation_id", str(uuid.uuid4())
+                    request.state, "correlation_id", str(TaskContext.get_correlation_id())
                 )
 
                 # Extract error details
@@ -183,16 +184,16 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
             try:
                 # Import metrics module
                 from stufio.db.metrics import get_request_metrics
-                
+
                 # Get metrics for this specific request
                 request_metrics = await get_request_metrics()
-                
+
                 # Extract detailed metrics
                 clickhouse_metrics = request_metrics["clickhouse"]
                 mongo_metrics = request_metrics["mongo"]
                 redis_metrics = request_metrics["redis"]
-                
-                # Populate metrics with detailed database information - use structured format 
+
+                # Populate metrics with detailed database information - use structured format
                 db_metrics = {
                     "mongodb": {
                         "queries": mongo_metrics["queries"],
@@ -229,7 +230,9 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
             client_ip = self._get_client_ip(request)
             user_agent = request.headers.get("user-agent", "")
             status_code = response.status_code
-            correlation_id = getattr(request.state, "correlation_id", str(uuid.uuid4()))
+            correlation_id = getattr(
+                request.state, "correlation_id", str(TaskContext.get_correlation_id())
+            )
 
             # Extract user ID and auth status
             user_id, is_authenticated = await self._extract_user_id(request)
@@ -281,7 +284,17 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
             # Convert ObjectId to string if necessary
             if hasattr(user_id, "__str__") and not isinstance(user_id, str):
                 user_id = str(user_id)
-                
+
+            # Ensure correlation_id is a valid UUID
+            try:
+                if correlation_id:
+                    correlation_id = str(uuid.UUID(correlation_id))
+                else:
+                    correlation_id = str(uuid.uuid4())
+            except ValueError:
+                # If correlation_id is not a valid UUID, generate a new one
+                correlation_id = str(uuid.uuid4())
+
             # Extract the entity type from the URL path
             path_parts = path.strip("/").split("/")
             entity_id = "endpoint"
@@ -354,7 +367,7 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                 "total_time_ms": process_time_ms,
                 "response_size_bytes": response_size or 0,
             }
-            
+
             # Add database metrics if available
             if db_metrics:
                 metrics.update(db_metrics)
@@ -365,7 +378,7 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                 actor_type=ActorType.USER if is_authenticated else ActorType.ANONYMOUS,
                 actor_id=user_id,
                 payload=payload,
-                correlation_id=correlation_id,
+                correlation_id=correlation_id,  # Now guaranteed to be a valid UUID string
                 metrics=metrics,
             )
 
@@ -388,7 +401,7 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                 )
         except Exception as e:
             logger.error(f"Error publishing API event: {e}", exc_info=True)
-            
+
     async def shutdown(self):
         """Clean up resources when the application shuts down."""
         if self.track_db_metrics:

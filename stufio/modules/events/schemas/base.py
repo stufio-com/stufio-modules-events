@@ -1,8 +1,8 @@
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Optional, Any, List
-from uuid import uuid4
-from pydantic import BaseModel, ConfigDict, Field, UUID4
+from uuid import UUID as UUID4, uuid4
+from typing import Dict, Any, Optional, List
+from pydantic import BaseModel, ConfigDict, Field
 
 class ActorType(str, Enum):
     """Type of actor performing an action."""

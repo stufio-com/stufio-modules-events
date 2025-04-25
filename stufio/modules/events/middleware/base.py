@@ -9,10 +9,11 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 import time
-import logging
 import uuid
-from typing import Optional, Dict, Any, Tuple, List, Callable, Awaitable
+import logging
+from typing import Optional, Tuple, List
 from stufio.core.config import get_settings
+from ..utils.context import TaskContext
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ DEFAULT_EXCLUDED_PATHS = [
 
 class BaseStufioMiddleware(BaseHTTPMiddleware):
     """Base middleware class for Stufio framework."""
-    
+
     def __init__(
         self, 
         app: ASGIApp, 
@@ -40,29 +41,47 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         # Paths to exclude from middleware processing
         self.excluded_paths = excluded_paths or DEFAULT_EXCLUDED_PATHS
-        
+
     async def dispatch(self, request: Request, call_next) -> Response:
         """Process a request through the middleware chain."""
-        # Generate correlation ID if not present
-        correlation_id = getattr(request.state, "correlation_id", str(uuid.uuid4()))
-        request.state.correlation_id = correlation_id
+        # First, clear any existing context to ensure isolation
+        TaskContext.clear()
         
+        # Check if request has a correlation-id header
+        corr_id_header = request.headers.get("x-correlation-id")
+        
+        # Generate or use existing correlation ID
+        if corr_id_header:
+            try:
+                # Use the provided correlation ID if valid format
+                TaskContext.set_correlation_id(corr_id_header)
+                correlation_id = str(TaskContext.get_correlation_id())
+            except ValueError:
+                # Generate new ID if header value was invalid format
+                correlation_id = str(uuid.uuid4())
+                TaskContext.set_correlation_id(correlation_id)
+        else:
+            # No header, generate a fresh UUID
+            correlation_id = str(uuid.uuid4())
+            TaskContext.set_correlation_id(correlation_id)
+        
+        # Store in request state for middleware access
+        request.state.correlation_id = correlation_id
+
         # Skip processing for excluded paths
         if self._should_skip_path(request):
-            return await call_next(request)
-        
-        # Extract common request info for subclasses
-        # path = request.url.path
-        # method = request.method
-        # client_ip = self._get_client_ip(request)
-        # user_agent = request.headers.get("user-agent", "")
-        
+            response = await call_next(request)
+            # Even for skipped paths, set the correlation ID header
+            if response:
+                response.headers["X-Correlation-ID"] = correlation_id
+            return response
+
         # Start timing
         start_time = time.time()
-        
+
         # Pre-processing hook for subclasses
         await self._pre_process(request)
-        
+
         # Process the request and catch exceptions
         response = None
         try:
@@ -74,7 +93,7 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
         finally:
             # Calculate request processing time
             process_time = time.time() - start_time
-            
+
             # Post-processing hook for subclasses
             if response is not None:
                 await self._post_process(
@@ -82,13 +101,21 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
                     response=response,
                     process_time=process_time
                 )
-                
-            return response or Response(status_code=500)
-    
+
+            # Ensure correlation ID is set even in error responses
+            if response and not isinstance(response, Response):
+                response = Response(content=response)
+            if response:
+                response.headers["X-Correlation-ID"] = correlation_id
+
+            return response or Response(
+                status_code=500, headers={"X-Correlation-ID": correlation_id}
+            )
+
     def _should_skip_path(self, request: Request) -> bool:
         """Determine if processing should be skipped for this path."""
         return request.url.path in self.excluded_paths
-    
+
     def _get_client_ip(self, request: Request) -> str:
         """Extract the real client IP from request headers."""
         forwarded = request.headers.get("x-forwarded-for")
@@ -96,7 +123,7 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
             # Get the first IP if multiple are provided
             return forwarded.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
-    
+
     def _normalize_path(self, path: str) -> str:
         """
         Normalize a path by replacing dynamic segments with placeholders.
@@ -115,7 +142,7 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
         normalized_path = re.sub(r"/\d{4}-\d{2}-\d{2}", "/{date}", normalized_path)
         normalized_path = re.sub(r"/\d+", "/{int}", normalized_path)
         return normalized_path
-    
+
     async def _extract_user_id(self, request: Request) -> Tuple[Optional[str], bool]:
         """
         Extract user ID from request if authenticated.
@@ -124,10 +151,10 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
             Tuple containing (user_id, is_authenticated)
         """
         from stufio.api import deps
-        
+
         user_id = None
         is_authenticated = False
-        
+
         auth_header = request.headers.get("authorization")
         if (
             auth_header
@@ -141,16 +168,16 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
                 is_authenticated = True
             except Exception as e:
                 logger.debug(f"Error extracting user from token: {e}")
-                
+
         return user_id, is_authenticated
-    
+
     async def _pre_process(self, request: Request) -> None:
         """
         Pre-processing hook to be implemented by subclasses.
         Called before the request is processed.
         """
         pass
-    
+
     async def _post_process(
         self, 
         request: Request, 
@@ -162,7 +189,7 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
         Called after the request is processed.
         """
         pass
-    
+
     async def _handle_exception(
         self, 
         request: Request, 

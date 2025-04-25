@@ -49,3 +49,53 @@ def register_module_events(
 ) -> None:
     """Register all events from a module."""
     event_registry.register_module_events(module_name, events)
+
+
+def extract_headers_safely(msg) -> Dict[str, str]:
+    """Extract headers from a message safely, handling various formats."""
+    headers = {}
+    try:
+        # Get raw headers from different possible locations
+        raw_headers = None
+        
+        # Try all possible locations for headers
+        if hasattr(msg, "headers") and msg.headers is not None:
+            raw_headers = msg.headers
+        elif hasattr(msg, "raw_message") and hasattr(msg.raw_message, "headers"):
+            raw_headers = msg.raw_message.headers or []
+        elif hasattr(msg, "_message") and hasattr(msg._message, "headers"):
+            raw_headers = msg._message.headers or []
+        
+        if not raw_headers:
+            return {}
+            
+        # Process based on type
+        if isinstance(raw_headers, dict):
+            # Dictionary format
+            for k, v in raw_headers.items():
+                headers[k.decode('utf-8') if isinstance(k, bytes) else k] = (
+                    v.decode('utf-8') if isinstance(v, bytes) else v
+                )
+        elif hasattr(raw_headers, "__iter__"):
+            # Iterable format (list, tuple, etc)
+            for item in raw_headers:
+                if hasattr(item, "__len__") and len(item) == 2:
+                    # Tuple format (key, value)
+                    k, v = item
+                    headers[k.decode('utf-8') if isinstance(k, bytes) else k] = (
+                        v.decode('utf-8') if isinstance(v, bytes) else v
+                    )
+                elif hasattr(item, "key") and hasattr(item, "value"):
+                    # Object format with key/value attributes
+                    k = item.key
+                    v = item.value
+                    headers[k.decode('utf-8') if isinstance(k, bytes) else k] = (
+                        v.decode('utf-8') if isinstance(v, bytes) else v
+                    )
+                
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error extracting headers: {e}", exc_info=True)
+        
+    return headers
+

@@ -1,6 +1,12 @@
 from typing import Dict, Any, Optional, Callable, Type, Union
-
+from datetime import datetime
+import asyncio
+import logging
+import time
+from uuid import UUID as UUID4, uuid4
+import httpx
 from pydantic import BaseModel
+from ..utils.context import TaskContext
 from ..schemas import (
     get_message_class,
     EventMessage,
@@ -13,12 +19,6 @@ from ..schemas import (
 )
 from .event_registry import EventRegistry
 from ..consumers import get_kafka_broker
-import asyncio
-import logging
-import time
-import uuid
-import httpx
-from datetime import datetime
 from stufio.core.config import get_settings
 
 settings = get_settings()
@@ -157,15 +157,22 @@ class EventBus:
         entity_obj = Entity(type=entity_type, id=entity_id)
         actor_obj = Actor(type=actor_type, id=actor_id)
 
-        # Convert correlation ID if needed
-        corr_id = uuid.UUID(correlation_id) if correlation_id else uuid.uuid4()
+        # Get correlation ID from parameter or TaskContext
+        corr_id = (
+            UUID4(correlation_id)
+            if correlation_id
+            else TaskContext.get_correlation_id()
+        )
 
-        # Get the right message and payload classes for this event type
-        # event_name = f"{entity_type}.{action}"  
+        # Always add correlation_id to Kafka headers
+        kafka_headers = custom_headers or {}
+        kafka_headers["correlation_id"] = str(corr_id)
+        kafka_headers["entity_type"] = entity_type
+        kafka_headers["action"] = action
 
         # Create the typed event message
         event = message_class(
-            event_id=uuid.uuid4(),
+            event_id=uuid4(),
             correlation_id=corr_id,
             timestamp=datetime.utcnow(),
             entity=entity_obj,
@@ -180,24 +187,6 @@ class EventBus:
         if hasattr(event, 'metrics') and hasattr(event.metrics, 'processing_time_ms'):
             event.metrics.processing_time_ms = processing_time
 
-        # Determine which topic to use with flexible configuration
-        kafka_headers = {}
-
-        # Always add core headers
-        kafka_headers["entity_type"] = entity_type  # Don't encode
-        kafka_headers["action"] = action  # Don't encode
-
-        # Add any additional headers you might need
-        if hasattr(event, "tenant_id") and event.tenant_id:
-            kafka_headers["tenant_id"] = str(event.tenant_id)  # Don't encode
-
-        # Add trace context if available
-        if correlation_id:
-            kafka_headers["correlation_id"] = str(corr_id)  # Don't encode
-
-        # Add custom headers if provided
-        if custom_headers:
-            kafka_headers.update(custom_headers)
 
         # Generate proper key for partitioning
         key_bytes = f"{entity_type}.{entity_id}".encode('utf-8') if entity_id else entity_type.encode('utf-8')

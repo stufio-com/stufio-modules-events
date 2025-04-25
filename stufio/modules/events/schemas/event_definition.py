@@ -1,8 +1,8 @@
 from typing import Dict, Any, Optional, Type, ClassVar, List, Union, TypeVar, Generic, get_args, get_origin
 import logging
-from httpx import get
 from pydantic import BaseModel, validator
 from stufio.core.config import get_settings
+from ..utils.context import TaskContext
 
 from .payloads import BaseEventPayload
 from .messages import BaseEventMessage, get_message_class
@@ -194,7 +194,8 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
         if not name or not entity_type or not action:
             raise ValueError(f"Event definition {cls.__name__} is missing required attributes")
 
-        # Get the payload class with fallback - THIS IS THE KEY CHANGE
+
+        # Get payload class with fallback
         payload_class = cls.get_payload_class()
 
         # Log what we're doing
@@ -230,6 +231,9 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
             else:
                 processed_payload = payload
 
+        # Get correlation ID from TaskContext
+        correlation_id = str(TaskContext.get_correlation_id())
+
         # Publish directly with event_bus
         return await event_bus.publish_from_definition(
             event_def=cls,
@@ -237,9 +241,8 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
             actor_type=actor_type,
             actor_id=actor_id,
             payload=processed_payload,
-            correlation_id=correlation_id,
+            correlation_id=correlation_id,  # Use correlation ID from TaskContext
             metrics=metrics,
-            # Explicitly pass the payload class to ensure it's used
             payload_class=payload_class  
         )
 

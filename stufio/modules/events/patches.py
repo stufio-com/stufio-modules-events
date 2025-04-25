@@ -47,6 +47,14 @@ async def improved_process_message(self, msg: Any) -> Any:
             await middleware.__aenter__()
             stack.push_async_exit(middleware.__aexit__)
         
+        # Add this right after setting up the context for message:
+        try:
+            # Apply correlation ID middleware first
+            from stufio.modules.events.consumers.kafka import correlation_id_middleware
+            await correlation_id_middleware(msg)
+        except Exception as e:
+            logger.warning(f"Error applying correlation_id_middleware: {e}")
+        
         # Check all handlers
         for h in self.calls:
             try:

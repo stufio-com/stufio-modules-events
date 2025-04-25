@@ -383,8 +383,6 @@ def stufio_event_subscriber(
         nonlocal event, topics, broker, channel, group_id, title, description, include_in_schema, filter, filter_kwargs, event_id, payload_class
 
         if group_id is None:
-            # group_id = f"{settings.events_KAFKA_GROUP_ID}.{event.entity_type}.{event.action}:{func_name}"
-            # Use a more generic group ID
             group_id = f"{settings.events_KAFKA_GROUP_ID}.{event.entity_type}.{event.action}"
 
         # Default title from event class
@@ -393,16 +391,14 @@ def stufio_event_subscriber(
 
         # Create a valid URI template channel name from event details
         if not channel:
-            # Create a valid URI template (alphanumeric, underscores, hyphens, periods, and forward slashes)
             entity_type = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', event.entity_type)
             action = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', event.action)
-
-            # Use the function name that we captured
-            channel = f"{settings.events_ASYNCAPI_PREFIX}.{entity_type}.{action}" #/{func_name}"
+            channel = f"{settings.events_ASYNCAPI_PREFIX}.{entity_type}.{action}"
 
         logger.debug(f"Using channel name: {channel} for event {event.__name__} function {func_name}")
 
-        # Now call stufio_subscriber with the constructed channel
+        # Important - DON'T wrap the handler function, just pass it directly
+        # This preserves the argument signatures expected by FastStream
         return stufio_subscriber(
             *topics,
             broker=broker,
@@ -414,9 +410,9 @@ def stufio_event_subscriber(
             include_in_schema=include_in_schema,
             event_id=event_id,
             group_id=group_id,
-            payload_class=payload_class,  # Pass the payload class
+            payload_class=payload_class,
             **kwargs
-        )(func)  # Immediately apply the returned decorator to func
+        )(func)  # Apply directly to the original function
 
     return decorator
 

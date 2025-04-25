@@ -287,5 +287,109 @@ def create_header_filter(**headers):
 # Make initialization happen when the module is imported
 await_shutdown_pending_producers()
 
+
+async def correlation_id_middleware(msg):
+    """Middleware to extract and set correlation_id from message headers."""
+    try:
+        from ..utils.context import TaskContext
+
+        # Extract headers if available
+        headers = {}
+        correlation_id = None
+
+        logger.warning(f"correlation_id_middleware processing message type: {type(msg).__name__}")
+
+        # DIRECT ACCESS: Handle ConsumerRecord objects directly (aiokafka)
+        if hasattr(msg, "headers") and msg.headers is not None:
+            # Direct access for ConsumerRecord objects
+            raw_headers = msg.headers
+            logger.warning(f"Direct raw headers: {raw_headers}")
+            
+            headers = {k.decode('utf-8') if isinstance(k, bytes) else k: 
+                      v.decode('utf-8') if isinstance(v, bytes) else v 
+                      for k, v in raw_headers}
+            
+            logger.warning(f"Direct processed headers: {headers}")
+        
+        # FASTSTREAM ACCESS: Handle FastStream message objects
+        elif hasattr(msg, "raw_message") and hasattr(msg.raw_message, "headers"):
+            raw_headers = msg.raw_message.headers or []
+            logger.warning(f"FastStream raw headers: {raw_headers}")
+
+            headers = {k.decode('utf-8') if isinstance(k, bytes) else k: 
+                      v.decode('utf-8') if isinstance(v, bytes) else v 
+                      for k, v in raw_headers}
+            
+            logger.warning(f"FastStream processed headers: {headers}")
+        
+        # RAW ATTEMPT: Try an even more direct approach
+        if not headers and hasattr(msg, "_message") and hasattr(msg._message, "headers"):
+            raw_headers = msg._message.headers or []
+            logger.warning(f"Raw _message headers: {raw_headers}")
+            
+            headers = {k.decode('utf-8') if isinstance(k, bytes) else k: 
+                      v.decode('utf-8') if isinstance(v, bytes) else v 
+                      for k, v in raw_headers}
+            
+            logger.warning(f"Processed _message headers: {headers}")
+
+        # Try to get correlation_id from headers first
+        correlation_id = headers.get('correlation_id')
+        if correlation_id:
+            before_id = TaskContext.get_correlation_id()
+            TaskContext.set_correlation_id(correlation_id)
+            after_id = TaskContext.get_correlation_id()
+
+            logger.warning(
+                f"✅ Set correlation_id from headers: '{correlation_id}' (changed from '{before_id}' to '{after_id}')"
+            )
+            return True
+        else:
+            logger.warning("No correlation_id found in headers")
+
+        # If no correlation_id in headers, try message body as JSON
+        if not correlation_id and hasattr(msg, 'value') and isinstance(msg.value, bytes):
+            try:
+                import json
+                body_data = json.loads(msg.value.decode('utf-8'))
+                if isinstance(body_data, dict) and 'correlation_id' in body_data:
+                    correlation_id = body_data['correlation_id']
+                    before_id = TaskContext.get_correlation_id()
+                    TaskContext.set_correlation_id(correlation_id)
+                    after_id = TaskContext.get_correlation_id()
+                    
+                    logger.warning(
+                        f"✅ Set correlation_id from JSON body: '{correlation_id}' (changed from '{before_id}' to '{after_id}')"
+                    )
+                    return True
+                else:
+                    logger.warning(f"JSON body parsed but no correlation_id found. Keys: {list(body_data.keys()) if isinstance(body_data, dict) else 'not a dict'}")
+            except Exception as e:
+                logger.warning(f"Failed to parse message value as JSON: {e}")
+
+        # Try other message body methods
+        for attr_name in ['_decoded_body', 'body']:
+            if hasattr(msg, attr_name) and isinstance(getattr(msg, attr_name), dict):
+                body_data = getattr(msg, attr_name)
+                correlation_id = body_data.get('correlation_id')
+                if correlation_id:
+                    before_id = TaskContext.get_correlation_id()
+                    TaskContext.set_correlation_id(correlation_id)
+                    after_id = TaskContext.get_correlation_id()
+                    
+                    logger.warning(
+                        f"✅ Set correlation_id from {attr_name}: '{correlation_id}' (changed from '{before_id}' to '{after_id}')"
+                    )
+                    return True
+                else:
+                    logger.warning(f"No correlation_id found in {attr_name}")
+
+        logger.warning("⚠️ No correlation_id found in any message location")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Error in correlation_id_middleware: {e}", exc_info=True)
+        return False
+
+
 # Updated exports that promote lazy initialization
-__all__ = ["get_kafka_router", "get_kafka_broker", "force_shutdown_kafka", "header_filter", "create_header_filter", "initialize_kafka"]
+__all__ = ["get_kafka_router", "get_kafka_broker", "force_shutdown_kafka", "header_filter", "create_header_filter", "initialize_kafka", "correlation_id_middleware"]

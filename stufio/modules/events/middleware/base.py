@@ -46,25 +46,21 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
         """Process a request through the middleware chain."""
         # First, clear any existing context to ensure isolation
         TaskContext.clear()
-        
+
         # Check if request has a correlation-id header
         corr_id_header = request.headers.get("x-correlation-id")
-        
+
         # Generate or use existing correlation ID
         if corr_id_header:
             try:
-                # Use the provided correlation ID if valid format
                 TaskContext.set_correlation_id(corr_id_header)
-                correlation_id = str(TaskContext.get_correlation_id())
             except ValueError:
-                # Generate new ID if header value was invalid format
-                correlation_id = str(uuid.uuid4())
-                TaskContext.set_correlation_id(correlation_id)
+                TaskContext.set_correlation_id(uuid.uuid4())
         else:
-            # No header, generate a fresh UUID
-            correlation_id = str(uuid.uuid4())
-            TaskContext.set_correlation_id(correlation_id)
-        
+            TaskContext.set_correlation_id(uuid.uuid4())
+            
+        correlation_id = str(TaskContext.get_correlation_id())
+
         # Store in request state for middleware access
         request.state.correlation_id = correlation_id
 

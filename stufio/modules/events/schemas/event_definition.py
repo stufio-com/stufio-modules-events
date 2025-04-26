@@ -231,8 +231,9 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
             else:
                 processed_payload = payload
 
-        # Get correlation ID from TaskContext
-        correlation_id = str(TaskContext.get_correlation_id())
+        if not correlation_id:
+            # Get correlation ID from TaskContext
+            correlation_id = str(TaskContext.get_correlation_id())
 
         # Publish directly with event_bus
         return await event_bus.publish_from_definition(

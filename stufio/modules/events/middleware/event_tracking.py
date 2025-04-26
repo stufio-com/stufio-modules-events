@@ -290,7 +290,9 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                 if correlation_id:
                     correlation_id = str(uuid.UUID(correlation_id))
                 else:
-                    correlation_id = str(uuid.uuid4())
+                    uuid_correlation_id = uuid.uuid4()
+                    correlation_id = str(uuid_correlation_id)
+                    TaskContext.set_correlation_id(uuid_correlation_id)
             except ValueError:
                 # If correlation_id is not a valid UUID, generate a new one
                 correlation_id = str(uuid.uuid4())

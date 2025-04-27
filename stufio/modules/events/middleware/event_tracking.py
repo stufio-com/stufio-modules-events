@@ -10,6 +10,7 @@ import json
 import traceback
 import logging
 import time
+from datetime import datetime
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
@@ -21,7 +22,8 @@ from ..schemas.base import ActorType
 from ..schemas.payloads import SystemErrorPayload, APIRequestPayload
 from ..events import SystemErrorEvent, APIRequestEvent
 from ..schemas.error import ErrorLogCreate
-from ..crud import crud_error_log
+from ..crud import crud_error_log, crud_event_metrics
+from ..schemas.event_metrics import EventMetricsCreate
 from stufio.core.config import get_settings
 
 settings = get_settings()
@@ -59,7 +61,9 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
         except ImportError:
             logger.warning("Database metrics module not available")
         except Exception as e:
-            logger.error(f"Failed to start database metrics collection: {e}", exc_info=True)
+            logger.error(
+                f"❌ Failed to start database metrics collection: {e}", exc_info=True
+            )
 
     async def _handle_exception(
         self, request: Request, exception: Exception
@@ -77,6 +81,10 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                 if not user_id:
                     client_ip = self._get_client_ip(request)
                     user_id = f"anon-{client_ip}"
+                
+                # Ensure user_id is a string, not an ObjectId or other type
+                if not isinstance(user_id, str):
+                    user_id = self._ensure_string_id(user_id)
 
                 # Generate correlation ID
                 correlation_id = getattr(
@@ -101,7 +109,7 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                     request_method=request.method,
                     status_code=500,
                     request_data=request_data,
-                    actor_id=user_id,
+                    actor_id=user_id,  # Now guaranteed to be a string
                 )
 
                 # Async task to save error log to database
@@ -123,7 +131,7 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                     )
                 )
             except Exception as e:
-                logger.error(f"Failed to track error: {e}", exc_info=True)
+                logger.error(f"❌ Failed to track error: {e}", exc_info=True)
 
         return response
 
@@ -279,7 +287,7 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
         is_authenticated: bool = False,
         db_metrics: dict = None
     ):
-        """Track API request as an APIRequestEvent."""
+        """Track API request as an APIRequestEvent and save metrics separately."""
         try:
             # Convert ObjectId to string if necessary
             if hasattr(user_id, "__str__") and not isinstance(user_id, str):
@@ -364,27 +372,113 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                 is_authenticated=is_authenticated,
             )
 
-            # Metrics for performance tracking
-            metrics = {
-                "total_time_ms": process_time_ms,
-                "response_size_bytes": response_size or 0,
-            }
+            # Generate event_id for the API request
+            event_id = str(uuid.uuid4())
+            timestamp = time.time()
+            timestamp_dt = datetime.utcfromtimestamp(timestamp)
 
-            # Add database metrics if available
-            if db_metrics:
-                metrics.update(db_metrics)
+            # 1. Save API log entry using CRUD pattern instead of direct SQL
+            try:
+                # Format headers and query params as JSON strings for storage
+                headers_json = json.dumps(dict(request.headers))
+                query_params_json = json.dumps(dict(request.query_params))
 
-            # Publish the API request event
+                # Create event_api_log model and use CRUD to save it
+                # This part would need a proper model and CRUD implementation similar to event_metrics
+                # For this refactoring we'll focus on the metrics part
+
+                # 2. Save metrics data using our new CRUD pattern
+                # Calculate start and end time
+                end_time = timestamp
+                start_time = end_time - (process_time_ms / 1000)
+
+                # Get tenant from settings
+                tenant = getattr(settings, "APP_NAME", "unknown")
+
+                # Extract DB metrics from the metrics object
+                mongodb_queries = 0
+                mongodb_time_ms = 0
+                mongodb_slow_queries = 0
+                clickhouse_queries = 0
+                clickhouse_time_ms = 0
+                clickhouse_slow_queries = 0
+                redis_operations = 0
+                redis_time_ms = 0
+                redis_slow_operations = 0
+
+                if db_metrics:
+                    if "mongodb" in db_metrics:
+                        mongodb_queries = db_metrics["mongodb"]["queries"]
+                        mongodb_time_ms = db_metrics["mongodb"]["time_ms"]
+                        mongodb_slow_queries = db_metrics["mongodb"]["slow_queries"]
+
+                    if "clickhouse" in db_metrics:
+                        clickhouse_queries = db_metrics["clickhouse"]["queries"]
+                        clickhouse_time_ms = db_metrics["clickhouse"]["time_ms"]
+                        clickhouse_slow_queries = db_metrics["clickhouse"]["slow_queries"]
+
+                    if "redis" in db_metrics:
+                        redis_operations = db_metrics["redis"]["operations"] 
+                        redis_time_ms = db_metrics["redis"]["time_ms"]
+                        redis_slow_operations = db_metrics["redis"]["slow_operations"]
+
+                # Create custom metrics to store API-specific data
+                custom_metrics = {
+                    "api": {
+                        "path": path,
+                        "method": method,
+                        "status_code": status_code,
+                        "response_size": response_size or 0
+                    }
+                }
+
+                # Prepare error message if there was an error
+                error_message = None
+                if error_info and "message" in error_info:
+                    error_message = error_info["message"]
+
+                # Create event metrics object
+                event_metrics = EventMetricsCreate(
+                    event_id=event_id,
+                    correlation_id=correlation_id,
+                    tenant=tenant,
+                    source_type="api",
+                    consumer_name="api_endpoint",
+                    module_name="fastapi",
+                    timestamp=datetime.utcnow(),
+                    started_at=datetime.fromtimestamp(start_time),
+                    completed_at=datetime.fromtimestamp(end_time),
+                    duration_ms=process_time_ms,
+                    success=(status_code < 500),
+                    error_message=error_message,
+                    mongodb_queries=mongodb_queries,
+                    mongodb_time_ms=mongodb_time_ms,
+                    mongodb_slow_queries=mongodb_slow_queries,
+                    clickhouse_queries=clickhouse_queries,
+                    clickhouse_time_ms=clickhouse_time_ms,
+                    clickhouse_slow_queries=clickhouse_slow_queries,
+                    redis_operations=redis_operations,
+                    redis_time_ms=redis_time_ms,
+                    redis_slow_operations=redis_slow_operations,
+                    custom_metrics=json.dumps(custom_metrics)
+                )
+
+                # Save metrics using the CRUD class
+                asyncio.create_task(crud_event_metrics.create_metrics(event_metrics))
+
+            except Exception as e:
+                logger.error(f"Error saving API metrics: {e}", exc_info=True)
+
+            # 3. Publish the API request event
             await APIRequestEvent.publish(
                 entity_id=entity_id,
                 actor_type=ActorType.USER if is_authenticated else ActorType.ANONYMOUS,
                 actor_id=user_id,
                 payload=payload,
-                correlation_id=correlation_id,  # Now guaranteed to be a valid UUID string
-                metrics=metrics,
+                correlation_id=correlation_id
             )
 
-            # For server errors, also publish a dedicated error event
+            # 4. For server errors, also publish a dedicated error event
             if status_code >= 500:
                 await SystemErrorEvent.publish(
                     entity_id="api_error",

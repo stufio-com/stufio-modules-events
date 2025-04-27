@@ -1,7 +1,6 @@
 import logging
 from typing import Dict, Any
 from fastapi import FastAPI
-from ..consumers.asyncapi import get_patched_app_schema
 from stufio.core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -63,20 +62,21 @@ class ConsumerRegistry:
     def register_with_app(self, app: FastAPI) -> None:
         """Register all consumers with the FastAPI app."""
         settings = get_settings()
-        
+
         if not settings.events_ASYNCAPI_DOCS_ENABLED:
             logger.warning("AsyncAPI documentation is disabled in settings.")
             return
-        
+
         if not self._initialized:
             logger.info("Initializing consumer registry")
             self._initialized = True
-            
+
         else:
             logger.info("Consumer registry already initialized, skipping.")
             return
-        
-        from stufio.modules.events.consumers.asyncapi_init import initialize_asyncapi_docs
+
+        from ..consumers.asyncapi_init import initialize_asyncapi_docs
+        from ..consumers.asyncapi_patches import get_patched_app_schema
 
         for key, router in self._registered_routers.items():
             try:
@@ -92,11 +92,16 @@ class ConsumerRegistry:
                             schema = get_patched_app_schema(router)
                             initialize_asyncapi_docs(app, schema)
                         except Exception as e:
-                            logger.error(f"Failed to initialize AsyncAPI docs: {e}", exc_info=True)
+                            logger.error(
+                                f"❌ Failed to initialize AsyncAPI docs: {e}",
+                                exc_info=True,
+                            )
                             continue
 
             except Exception as e:
-                logger.error(f"Failed to register Kafka router {key}: {e}", exc_info=True)
+                logger.error(
+                    f"❌ Failed to register Kafka router {key}: {e}", exc_info=True
+                )
 
 
 # Global singleton instance

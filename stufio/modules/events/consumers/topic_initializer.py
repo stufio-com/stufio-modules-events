@@ -28,7 +28,7 @@ class KafkaTopicInitializer:
                 await self.admin_client.start()
                 logger.info(f"Connected to Kafka at {bootstrap_servers}")
             except Exception as e:
-                logger.error(f"Failed to connect to Kafka: {e}", exc_info=True)
+                logger.error(f"❌ Failed to connect to Kafka: {e}", exc_info=True)
                 raise
 
     async def close_client(self) -> None:
@@ -171,7 +171,7 @@ class KafkaTopicInitializer:
             logger.info(f"Created topic: {config.name} with {config.num_partitions} partitions")
             return True
         except Exception as e:
-            logger.error(f"Failed to create topic {config.name}: {e}", exc_info=True)
+            logger.error(f"❌ Failed to create topic {config.name}: {e}", exc_info=True)
             return False
 
     async def initialize_topics(self) -> int:
@@ -225,7 +225,7 @@ class KafkaTopicInitializer:
 
             return created_count
         except Exception as e:
-            logger.error(f"Failed to initialize topics: {e}", exc_info=True)
+            logger.error(f"❌ Failed to initialize topics: {e}", exc_info=True)
             return 0
         finally:
             # Close the Kafka admin client

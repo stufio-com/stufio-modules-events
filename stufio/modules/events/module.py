@@ -71,13 +71,15 @@ class KafkaModuleMixin:
                         logger.debug(f"No customer kafka brokers found for {module_name}")
 
                 except ImportError as e:
-                    logger.error(f"Failed to import consumers module for {module_name}: {e}: {module_path}")
+                    logger.error(
+                        f"❌ Failed to import consumers module for {module_name}: {e}: {module_path}"
+                    )
                     logger.debug(f"Attempted import path: {module_path}")
 
                 logger.info(f"Kafka consumer registration complete for {module_name}")
             except Exception as e:
                 logger.error(
-                    f"Failed to register Kafka consumers for {module_name}: {e}",
+                    f"❌ Failed to register Kafka consumers for {module_name}: {e}",
                     exc_info=True,
                 )
 
@@ -104,7 +106,7 @@ class KafkaModuleMixin:
                     else:
                         logger.info(f"Kafka broker {broker} is already started")
             except Exception as e:
-                logger.error(f"Failed to start Kafka: {str(e)}", exc_info=True)
+                logger.error(f"❌ Failed to start Kafka: {str(e)}", exc_info=True)
 
     async def stop_kafka(self: "ModuleInterface", app: StufioAPI) -> None:
         """Stop the Kafka broker connection with proper cleanup."""

@@ -1,5 +1,5 @@
 """
-Migration to create error_logs table in Clickhouse
+Migration to create event_error_logs table in Clickhouse
 """
 from stufio.core.migrations.base import ClickhouseMigrationScript
 from stufio.db.clickhouse import get_database_from_dsn
@@ -14,10 +14,10 @@ class CreateErrorLogsTable(ClickhouseMigrationScript):
 
         db_name = get_database_from_dsn()
 
-        # Create error_logs table
+        # Create event_error_logs table
         await db.command(
             f"""
-        CREATE TABLE IF NOT EXISTS `{db_name}`.`error_logs` (
+        CREATE TABLE IF NOT EXISTS `{db_name}`.`event_error_logs` (
             id UUID DEFAULT generateUUIDv4(),
             error_id UUID NOT NULL,
             correlation_id UUID NULL,
@@ -59,7 +59,7 @@ class CreateErrorLogsTable(ClickhouseMigrationScript):
         # Create materialized view for error statistics
         await db.command(
             f"""
-        CREATE MATERIALIZED VIEW IF NOT EXISTS `{db_name}`.`error_logs_daily`
+        CREATE MATERIALIZED VIEW IF NOT EXISTS `{db_name}`.`event_error_logs_daily`
         ENGINE = SummingMergeTree
         ORDER BY (error_date, error_type, source, severity)
         POPULATE AS
@@ -70,7 +70,7 @@ class CreateErrorLogsTable(ClickhouseMigrationScript):
             severity,
             status_code,
             count() as error_count
-        FROM error_logs
+        FROM event_error_logs
         GROUP BY error_date, error_type, source, severity, status_code
         """
         )

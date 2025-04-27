@@ -25,4 +25,4 @@ class ErrorLogModel(ClickhouseBase):
     resolved_by: Optional[str] = None
     resolved_at: Optional[datetime] = None
 
-    model_config = ConfigDict(table_name="error_logs")
+    model_config = ConfigDict(table_name="event_error_logs")

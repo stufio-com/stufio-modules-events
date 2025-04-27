@@ -11,7 +11,7 @@ from starlette.types import ASGIApp
 import time
 import uuid
 import logging
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Any
 from stufio.core.config import get_settings
 from ..utils.context import TaskContext
 
@@ -58,7 +58,7 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
                 TaskContext.set_correlation_id(uuid.uuid4())
         else:
             TaskContext.set_correlation_id(uuid.uuid4())
-            
+
         correlation_id = str(TaskContext.get_correlation_id())
 
         # Store in request state for middleware access
@@ -66,11 +66,20 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
 
         # Skip processing for excluded paths
         if self._should_skip_path(request):
-            response = await call_next(request)
-            # Even for skipped paths, set the correlation ID header
-            if response:
-                response.headers["X-Correlation-ID"] = correlation_id
-            return response
+            try:
+                response = await call_next(request)
+                # Even for skipped paths, set the correlation ID header
+                if response:
+                    response.headers["X-Correlation-ID"] = correlation_id
+                return response
+            except Exception as e:
+                logger.exception(f"❌ Error in middleware for excluded path: {e}")
+                # Create fallback response
+                return Response(
+                    content=f"Internal server error: {str(e)}",
+                    status_code=500,
+                    headers={"X-Correlation-ID": correlation_id},
+                )
 
         # Start timing
         start_time = time.time()
@@ -82,31 +91,50 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
         response = None
         try:
             response = await call_next(request)
+        except RuntimeError as e:
+            if "No response returned" in str(e):
+                logger.error(f"Middleware error - No response returned: {e}")
+                response = Response(
+                    content="No response was returned from the application",
+                    status_code=500,
+                    headers={"X-Correlation-ID": correlation_id}
+                )
+            else:
+                logger.exception(f"❌ Runtime error in middleware: {e}")
+                response = await self._handle_exception(request, e)
         except Exception as e:
-            logger.exception(f"Error in middleware chain: {e}")
+            logger.exception(f"❌ Error in middleware chain: {e}")
             # Handle exception and generate response
             response = await self._handle_exception(request, e)
         finally:
             # Calculate request processing time
             process_time = time.time() - start_time
 
-            # Post-processing hook for subclasses
-            if response is not None:
-                await self._post_process(
-                    request=request, 
-                    response=response,
-                    process_time=process_time
+            # Ensure we have a response object
+            if response is None:
+                logger.error("No response was returned from middleware chain")
+                response = Response(
+                    content="No response was returned from the application",
+                    status_code=500,
+                    headers={"X-Correlation-ID": correlation_id}
                 )
 
-            # Ensure correlation ID is set even in error responses
-            if response and not isinstance(response, Response):
-                response = Response(content=response)
-            if response:
+            # Post-processing hook for subclasses - only if we have a valid response
+            if response is not None:
+                try:
+                    await self._post_process(
+                        request=request, 
+                        response=response,
+                        process_time=process_time
+                    )
+                except Exception as e:
+                    logger.error(f"❌ Error in post-processing: {e}", exc_info=True)
+
+            # Ensure correlation ID is set in the response
+            if response and hasattr(response, "headers"):
                 response.headers["X-Correlation-ID"] = correlation_id
 
-            return response or Response(
-                status_code=500, headers={"X-Correlation-ID": correlation_id}
-            )
+            return response
 
     def _should_skip_path(self, request: Request) -> bool:
         """Determine if processing should be skipped for this path."""
@@ -165,7 +193,19 @@ class BaseStufioMiddleware(BaseHTTPMiddleware):
             except Exception as e:
                 logger.debug(f"Error extracting user from token: {e}")
 
+        # Convert user_id to string if it's an ObjectId
+        if user_id is not None and not isinstance(user_id, str):
+            user_id = str(user_id)
+
         return user_id, is_authenticated
+
+    def _ensure_string_id(self, obj_id: Any) -> str:
+        """Convert various ID types to strings safely."""
+        if obj_id is None:
+            return ""
+        if hasattr(obj_id, "__str__"):
+            return str(obj_id)
+        return ""
 
     async def _pre_process(self, request: Request) -> None:
         """

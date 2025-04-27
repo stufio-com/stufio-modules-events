@@ -39,7 +39,7 @@ class KafkaBrokerMock:
 
     async def publish(self, *args, **kwargs):
         """Mock publish method."""
-        self.logger.warning(
+        self.logger.debug(
             "Kafka publishing disabled. Set events_KAFKA_ENABLED=True to enable."
         )
         return None
@@ -69,7 +69,7 @@ def initialize_kafka():
     if not kafka_enabled:
         kafka_router = KafkaBrokerMock(logger)
         kafka_broker = KafkaBrokerMock(logger)
-        logger.warning("Kafka is not enabled in settings. Set events_KAFKA_ENABLED=True to enable.")
+        logger.debug("Kafka is not enabled in settings. Set events_KAFKA_ENABLED=True to enable.")
         _initialized = True
         return
 
@@ -98,7 +98,7 @@ def initialize_kafka():
         logger.info("Kafka router initialized successfully")
         _initialized = True
     except Exception as e:
-        logger.error(f"Failed to initialize Kafka router: {e}")
+        logger.error(f"❌ Failed to initialize Kafka router: {e}")
         # Set to None in case of error
         kafka_router = None
         kafka_broker = None
@@ -117,7 +117,7 @@ def await_shutdown_pending_producers():
                      and not getattr(obj, "_closed", False)]
 
         if producers:
-            logger.warning(f"Found {len(producers)} unclosed AIOKafkaProducer instances from previous run")
+            logger.debug(f"Found {len(producers)} unclosed AIOKafkaProducer instances from previous run")
 
             # Create an event loop if needed
             try:
@@ -135,7 +135,7 @@ def await_shutdown_pending_producers():
                         producer._closed = True
                         logger.info(f"Closed leftover producer {producer}")
                 except Exception as e:
-                    logger.warning(f"Error closing leftover producer: {e}")
+                    logger.debug(f"Error closing leftover producer: {e}")
     except Exception as e:
         logger.error(f"Error cleaning up pending producers: {e}")
 
@@ -173,7 +173,7 @@ async def force_shutdown_kafka():
                         await producer.stop()
                         producer._closed = True
                 except Exception as e:
-                    logger.warning(f"Error force-closing producer: {e}")
+                    logger.debug(f"Error force-closing producer: {e}")
 
         # Also close tracked producers
         for producer in _producers:
@@ -183,7 +183,7 @@ async def force_shutdown_kafka():
                     await producer.stop()
                     producer._closed = True
             except Exception as e:
-                logger.warning(f"Error closing tracked producer: {e}")
+                logger.debug(f"Error closing tracked producer: {e}")
 
         # 2. Force close all aiokafka consumers
         consumers = [obj for obj in gc.get_objects()
@@ -199,7 +199,7 @@ async def force_shutdown_kafka():
                         await consumer.stop()
                         consumer._closed = True
                 except Exception as e:
-                    logger.warning(f"Error force-closing consumer: {e}")
+                    logger.debug(f"Error force-closing consumer: {e}")
 
         # 3. Close the broker explicitly
         if hasattr(kafka_broker, "shutdown"):
@@ -297,41 +297,41 @@ async def correlation_id_middleware(msg):
         headers = {}
         correlation_id = None
 
-        logger.warning(f"correlation_id_middleware processing message type: {type(msg).__name__}")
+        logger.debug(f"correlation_id_middleware processing message type: {type(msg).__name__}")
 
         # DIRECT ACCESS: Handle ConsumerRecord objects directly (aiokafka)
         if hasattr(msg, "headers") and msg.headers is not None:
             # Direct access for ConsumerRecord objects
             raw_headers = msg.headers
-            logger.warning(f"Direct raw headers: {raw_headers}")
-            
-            headers = {k.decode('utf-8') if isinstance(k, bytes) else k: 
-                      v.decode('utf-8') if isinstance(v, bytes) else v 
-                      for k, v in raw_headers}
-            
-            logger.warning(f"Direct processed headers: {headers}")
-        
-        # FASTSTREAM ACCESS: Handle FastStream message objects
-        elif hasattr(msg, "raw_message") and hasattr(msg.raw_message, "headers"):
-            raw_headers = msg.raw_message.headers or []
-            logger.warning(f"FastStream raw headers: {raw_headers}")
+            logger.debug(f"Direct raw headers: {raw_headers}")
 
             headers = {k.decode('utf-8') if isinstance(k, bytes) else k: 
                       v.decode('utf-8') if isinstance(v, bytes) else v 
                       for k, v in raw_headers}
-            
-            logger.warning(f"FastStream processed headers: {headers}")
-        
-        # RAW ATTEMPT: Try an even more direct approach
-        if not headers and hasattr(msg, "_message") and hasattr(msg._message, "headers"):
-            raw_headers = msg._message.headers or []
-            logger.warning(f"Raw _message headers: {raw_headers}")
-            
+
+            logger.debug(f"Direct processed headers: {headers}")
+
+        # FASTSTREAM ACCESS: Handle FastStream message objects
+        elif hasattr(msg, "raw_message") and hasattr(msg.raw_message, "headers"):
+            raw_headers = msg.raw_message.headers or []
+            logger.debug(f"FastStream raw headers: {raw_headers}")
+
             headers = {k.decode('utf-8') if isinstance(k, bytes) else k: 
                       v.decode('utf-8') if isinstance(v, bytes) else v 
                       for k, v in raw_headers}
-            
-            logger.warning(f"Processed _message headers: {headers}")
+
+            logger.debug(f"FastStream processed headers: {headers}")
+
+        # RAW ATTEMPT: Try an even more direct approach
+        if not headers and hasattr(msg, "_message") and hasattr(msg._message, "headers"):
+            raw_headers = msg._message.headers or []
+            logger.debug(f"Raw _message headers: {raw_headers}")
+
+            headers = {k.decode('utf-8') if isinstance(k, bytes) else k: 
+                      v.decode('utf-8') if isinstance(v, bytes) else v 
+                      for k, v in raw_headers}
+
+            logger.debug(f"Processed _message headers: {headers}")
 
         # Try to get correlation_id from headers first
         correlation_id = headers.get('correlation_id')
@@ -340,12 +340,12 @@ async def correlation_id_middleware(msg):
             TaskContext.set_correlation_id(correlation_id)
             after_id = TaskContext.get_correlation_id()
 
-            logger.warning(
+            logger.debug(
                 f"✅ Set correlation_id from headers: '{correlation_id}' (changed from '{before_id}' to '{after_id}')"
             )
             return True
         else:
-            logger.warning("No correlation_id found in headers")
+            logger.debug("No correlation_id found in headers")
 
         # If no correlation_id in headers, try message body as JSON
         if not correlation_id and hasattr(msg, 'value') and isinstance(msg.value, bytes):
@@ -357,15 +357,15 @@ async def correlation_id_middleware(msg):
                     before_id = TaskContext.get_correlation_id()
                     TaskContext.set_correlation_id(correlation_id)
                     after_id = TaskContext.get_correlation_id()
-                    
-                    logger.warning(
+
+                    logger.debug(
                         f"✅ Set correlation_id from JSON body: '{correlation_id}' (changed from '{before_id}' to '{after_id}')"
                     )
                     return True
                 else:
-                    logger.warning(f"JSON body parsed but no correlation_id found. Keys: {list(body_data.keys()) if isinstance(body_data, dict) else 'not a dict'}")
+                    logger.debug(f"JSON body parsed but no correlation_id found. Keys: {list(body_data.keys()) if isinstance(body_data, dict) else 'not a dict'}")
             except Exception as e:
-                logger.warning(f"Failed to parse message value as JSON: {e}")
+                logger.debug(f"❌ Failed to parse message value as JSON: {e}")
 
         # Try other message body methods
         for attr_name in ['_decoded_body', 'body']:
@@ -376,13 +376,13 @@ async def correlation_id_middleware(msg):
                     before_id = TaskContext.get_correlation_id()
                     TaskContext.set_correlation_id(correlation_id)
                     after_id = TaskContext.get_correlation_id()
-                    
-                    logger.warning(
+
+                    logger.debug(
                         f"✅ Set correlation_id from {attr_name}: '{correlation_id}' (changed from '{before_id}' to '{after_id}')"
                     )
                     return True
                 else:
-                    logger.warning(f"No correlation_id found in {attr_name}")
+                    logger.debug(f"No correlation_id found in {attr_name}")
 
         logger.warning("⚠️ No correlation_id found in any message location")
         return False

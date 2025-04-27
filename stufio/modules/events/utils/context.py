@@ -1,8 +1,9 @@
 """Context management utilities for event tracking."""
 
 from contextvars import ContextVar
-from typing import Optional, Union
+from typing import Optional, Union, Any, Coroutine
 from uuid import UUID as UUID4, uuid4
+import asyncio
 
 class TaskContext:
     """Context manager for managing task-level context."""
@@ -74,3 +75,42 @@ class TaskContext:
         context = cls._context.get()
         context.update(kwargs)
         cls._context.set(context)
+        
+    @classmethod
+    async def run_task(
+        cls, 
+        coro: Coroutine[Any, Any, Any], 
+        *, 
+        correlation_id: Optional[Union[str, UUID4]] = None
+    ) -> Any:
+        """
+        Run a coroutine with the specified correlation ID in its context.
+        
+        This ensures that the correlation ID is propagated to the task and
+        is available through get_correlation_id() within the task.
+        
+        Args:
+            coro: The coroutine to run
+            correlation_id: Optional correlation ID to associate with the task.
+                            If None, an existing correlation ID will be used or
+                            a new one will be generated.
+                            
+        Returns:
+            The result of the coroutine execution
+        """
+        # Save the current context
+        old_context = cls.get_context()
+        
+        try:
+            # Set up the new context with the correlation ID if provided
+            if correlation_id is not None:
+                cls.set_correlation_id(correlation_id)
+            else:
+                # Use existing correlation ID or generate one if needed
+                cls.get_correlation_id()
+                
+            # Run the coroutine with the established context
+            return await coro
+        finally:
+            # Restore the original context
+            cls._context.set(old_context)

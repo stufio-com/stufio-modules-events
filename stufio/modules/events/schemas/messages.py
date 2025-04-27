@@ -31,7 +31,3 @@ class BaseEventMessage(BaseModel, Generic[P]):
 
         super().__init__(**data)
 
-def get_message_class(event_name: str, payload_class: Type[BaseEventPayload]) -> Type[BaseEventMessage]:
-    """Get the appropriate message class for an event name."""
-    # Simply use BaseEventMessage with the payload type
-    return BaseEventMessage[payload_class]

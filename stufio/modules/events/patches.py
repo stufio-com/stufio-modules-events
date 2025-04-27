@@ -4,7 +4,6 @@ from contextlib import AsyncExitStack
 
 # Import the classes we need to patch
 from faststream.broker.subscriber.usecase import SubscriberUsecase
-from faststream.broker.response import ensure_response
 from faststream.utils.context.repository import context
 
 logger = logging.getLogger(__name__)
@@ -73,11 +72,11 @@ async def improved_process_message(self, msg: Any) -> Any:
                          context.scope("message", message):
                         
                         # Call the handler and get result
-                        result_msg = ensure_response(
-                            await h.call(
-                                message=message,
-                                _extra_middlewares=(m.consume_scope for m in middlewares[::-1])
-                            )
+                        # HandlerResponse is now a subclass of FastStreamResponse, 
+                        # so FastStream's ensure_response will work correctly
+                        result_msg = await h.call(
+                            message=message,
+                            _extra_middlewares=(m.consume_scope for m in middlewares[::-1])
                         )
                         
                         # Set correlation ID if needed
@@ -156,6 +155,8 @@ async def improved_process_message(self, msg: Any) -> Any:
             return results[0]  # For backward compatibility
         return results
     
+    # Use standard ensure_response for empty responses
+    from faststream.broker.response import ensure_response
     return ensure_response(None)  # Return empty response
 
 def apply_faststream_patches():

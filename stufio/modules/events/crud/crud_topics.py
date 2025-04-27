@@ -39,7 +39,7 @@ class CRUDKafkaTopics:
                 await self.admin_client.start()
                 logger.info(f"Connected to Kafka at {bootstrap_servers}")
             except Exception as e:
-                logger.error(f"Failed to connect to Kafka: {e}", exc_info=True)
+                logger.error(f"❌ Failed to connect to Kafka: {e}", exc_info=True)
                 raise
         return self.admin_client
 
@@ -68,35 +68,35 @@ class CRUDKafkaTopics:
 
             # Convert topic_partitions to dictionary for easier lookup
             topic_partitions_dict = {item['topic']: item for item in topic_partitions}
-            
+
             # Create a dictionary for topic_configs
             topic_configs_dict: Dict[str, Dict[str, Any]] = {}
             # Add debug info to understand the structure
             logger.debug(f"topic_configs type: {type(topic_configs)}")
-            
+
             # If topic_configs is not a list or a tuple, make it a list so we can iterate
             if not isinstance(topic_configs, (list, tuple)):
                 topic_configs = [topic_configs]
-                
+
             for config_item in topic_configs:
                 logger.debug(f"Config item type: {type(config_item)}")
-                
+
                 # Handle the structure: (0, '', 2, 'topic_name', [(config_tuples)])
                 if isinstance(config_item, tuple) and len(config_item) > 3:
                     # Extract topic name from tuple (index 3)
                     topic_name = config_item[3]
-                    
+
                     # Extract configs list from tuple (index 4) if available
                     if len(config_item) > 4 and isinstance(config_item[4], list):
                         configs_list = config_item[4]
                         topic_configs_dict[topic_name] = {"configs": configs_list}
                         logger.debug(f"Added topic {topic_name} with {len(configs_list)} configs")
-                
+
                 # Legacy object format handling - kept for backward compatibility
                 elif hasattr(config_item, 'resources'):
                     resources = config_item.resources
                     logger.debug(f"Resources type: {type(resources)}")
-                    
+
                     if isinstance(resources, list):
                         for resource in resources:
                             # Handle if resource is a tuple with expected structure
@@ -118,7 +118,7 @@ class CRUDKafkaTopics:
                 sample_config = topic_configs[0]
                 logger.debug(f"Sample config item: {sample_config}")
                 logger.debug(f"Sample config type: {type(sample_config)}")
-                
+
                 # If it's a tuple, check its structure
                 if isinstance(sample_config, tuple):
                     logger.debug(f"Config tuple length: {len(sample_config)}")
@@ -136,7 +136,7 @@ class CRUDKafkaTopics:
                 config: Dict[str, str] = {}
                 if topic in topic_configs_dict:
                     configs_data = topic_configs_dict[topic]["configs"]
-                    
+
                     # Process list of config tuples - each config is a tuple like:
                     # (name, value, is_default, ...)
                     if isinstance(configs_data, list):
@@ -167,7 +167,7 @@ class CRUDKafkaTopics:
                     # Log the actual structure for debugging
                     if isinstance(partition, dict):
                         logger.debug(f"Partition structure: {list(partition.keys())}")
-                    
+
                     # Use safe extraction method for all fields
                     partitions.append(TopicPartitionInfo(
                         id=self._safe_get(partition, ['id', 'partition', 'partition_id'], 0),
@@ -189,7 +189,7 @@ class CRUDKafkaTopics:
 
             return results
         except Exception as e:
-            logger.error(f"Failed to list topics: {e}", exc_info=True)
+            logger.error(f"❌ Failed to list topics: {e}", exc_info=True)
             return []
         finally:
             await self.close_client()
@@ -231,7 +231,7 @@ class CRUDKafkaTopics:
                 if meta_item.get('topic') == topic_name:
                     topic_meta = meta_item
                     break
-                    
+
             if topic_meta and 'partitions' in topic_meta:
                 for partition in topic_meta['partitions']:
                     # Use the safe getter method
@@ -239,9 +239,9 @@ class CRUDKafkaTopics:
                     leader = self._safe_get(partition, ['leader', 'leader_id'], -1)
                     replicas = self._safe_get(partition, ['replicas', 'replica_nodes'], [])
                     isr = self._safe_get(partition, ['isr', 'isr_nodes', 'in_sync_replicas'], [])
-                    
+
                     tp = TopicPartition(topic_name, partition_id)
-                    
+
                     # Get beginning and end offsets
                     beginning_offset = await consumer.beginning_offsets([tp])
                     end_offset = await consumer.end_offsets([tp])
@@ -263,26 +263,26 @@ class CRUDKafkaTopics:
 
             # Create a dictionary for topic_configs - using same approach as list_topics
             topic_configs_dict: Dict[str, Dict[str, Any]] = {}
-            
+
             # If topic_configs is not a list or a tuple, make it a list so we can iterate
             if not isinstance(topic_configs, (list, tuple)):
                 topic_configs = [topic_configs]
-                
+
             for config_item in topic_configs:
                 # Handle the structure: (0, '', 2, 'topic_name', [(config_tuples)])
                 if isinstance(config_item, tuple) and len(config_item) > 3:
                     # Extract topic name from tuple (index 3)
                     config_topic_name = config_item[3]
-                    
+
                     # Extract configs list from tuple (index 4) if available
                     if len(config_item) > 4 and isinstance(config_item[4], list):
                         configs_list = config_item[4]
                         topic_configs_dict[config_topic_name] = {"configs": configs_list}
-                
+
                 # Legacy object format handling - kept for backward compatibility
                 elif hasattr(config_item, 'resources'):
                     resources = config_item.resources
-                    
+
                     if isinstance(resources, list):
                         for resource in resources:
                             # Handle if resource is a tuple with expected structure
@@ -301,7 +301,7 @@ class CRUDKafkaTopics:
             config: Dict[str, str] = {}
             if topic_name in topic_configs_dict:
                 configs_data = topic_configs_dict[topic_name]["configs"]
-                
+
                 # Process list of config tuples - each config is a tuple like:
                 # (name, value, is_default, ...)
                 if isinstance(configs_data, list):
@@ -369,7 +369,7 @@ class CRUDKafkaTopics:
 
             return result
         except Exception as e:
-            logger.error(f"Failed to get topic metrics: {e}", exc_info=True)
+            logger.error(f"❌ Failed to get topic metrics: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
             await self.close_client()
@@ -415,7 +415,7 @@ class CRUDKafkaTopics:
                 "updated_config": filtered_config
             }
         except Exception as e:
-            logger.error(f"Failed to update topic config: {e}", exc_info=True)
+            logger.error(f"❌ Failed to update topic config: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
             await self.close_client()
@@ -479,7 +479,7 @@ class CRUDKafkaTopics:
                 message="Topic log rotation triggered"
             )
         except Exception as e:
-            logger.error(f"Failed to rotate topic logs: {e}", exc_info=True)
+            logger.error(f"❌ Failed to rotate topic logs: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
             await self.close_client()
@@ -550,7 +550,7 @@ class CRUDKafkaTopics:
                 deleted_topics=deleted_topics
             )
         except Exception as e:
-            logger.error(f"Failed to cleanup empty topics: {e}", exc_info=True)
+            logger.error(f"❌ Failed to cleanup empty topics: {e}", exc_info=True)
             return {"error": str(e)}
         finally:
             await self.close_client()
@@ -567,17 +567,17 @@ class CRUDKafkaTopics:
                     health_results[topic.name] = "unhealthy"
                 else:
                     health_results[topic.name] = "healthy"
-            
+
             return TopicHealthResponse(topics=health_results)
         except Exception as e:
-            logger.error(f"Failed to get topics health: {e}")
+            logger.error(f"❌ Failed to get topics health: {e}")
             return {"error": str(e)}
 
     def _safe_get(self, obj: Any, keys: List[str], default: Any = None) -> Any:
         """Safely get a value from nested dictionary or object attributes."""
         if obj is None:
             return default
-            
+
         # For dictionaries with potentially different key names
         if isinstance(obj, dict):
             # Try common field name variations
@@ -585,7 +585,7 @@ class CRUDKafkaTopics:
                 if key in obj:
                     return obj[key]
             return default
-            
+
         # For objects with attributes
         for key in keys:
             if hasattr(obj, key):

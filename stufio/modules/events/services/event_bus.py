@@ -8,7 +8,6 @@ import httpx
 from pydantic import BaseModel
 from ..utils.context import TaskContext
 from ..schemas import (
-    get_message_class,
     EventMessage,
     Entity,
     Actor,
@@ -18,7 +17,6 @@ from ..schemas import (
     BaseEventPayload,
 )
 from .event_registry import EventRegistry
-from ..consumers import get_kafka_broker
 from stufio.core.config import get_settings
 
 settings = get_settings()
@@ -35,7 +33,7 @@ class EventBus:
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            cls._instance = super(EventBus, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
         return cls._instance
 
     async def initialize(self) -> None:
@@ -43,12 +41,54 @@ class EventBus:
         if self._initialized:
             return
 
+        # Use lazy import to avoid circular reference
+        from ..consumers.kafka import get_kafka_broker
         self.kafka_client = get_kafka_broker()
         self.registry = EventRegistry()
         self.http_client = httpx.AsyncClient(timeout=30.0)
         self._initialized = True
 
-        self._initialized = True
+    async def publish_from_info(
+        self,
+        event_info: "PublishEventInfo",
+    ) -> Optional["BaseEventMessage"]:
+        """
+        Publish an event using a PublishEventInfo object.
+        
+        Requires an event_type (EventDefinition) to be specified.
+        
+        Returns:
+            The event message that was published, or None if publishing failed
+        """
+        from ..schemas.handler import PublishEventInfo
+
+        if not isinstance(event_info, PublishEventInfo):
+            try:
+                # Try to convert dict to PublishEventInfo
+                event_info = PublishEventInfo(**event_info)
+            except Exception as e:
+                logger.error(
+                    f"❌ Failed to convert event_info to PublishEventInfo: {e}"
+                )
+                return None
+
+        # Ensure event bus is initialized
+        await self.initialize()
+
+        try:
+            # Publish using the event definition
+            return await self.publish_from_definition(
+                event_def=event_info.event_type,
+                entity_id=event_info.entity_id,
+                actor_type=event_info.actor_type,
+                actor_id=event_info.actor_id,
+                payload=event_info.payload,
+                correlation_id=event_info.correlation_id,
+                metrics=event_info.metrics,
+            )
+        except Exception as e:
+            logger.exception(f"Error publishing event from info: {e}")
+            return None
 
     async def publish_from_definition(
         self,
@@ -140,9 +180,28 @@ class EventBus:
         message_class: Type[BaseEventMessage] = BaseEventMessage,
         custom_topic: Optional[str] = None,
         is_high_volume: bool = False,
-        custom_headers: Optional[Dict[str, str]] = None  # Added parameter
+        custom_headers: Optional[Dict[str, str]] = None
     ) -> BaseEventMessage:
-        """Publish an event to Kafka and store in Clickhouse."""
+        """Publish an event to Kafka and store in Clickhouse.
+        
+        WARNING: This method is deprecated for direct use. Please use publish_from_definition
+        with an EventDefinition class instead for better type safety and documentation.
+        """
+        import warnings
+        import inspect
+
+        # Skip deprecation warning if called from publish_from_definition
+        calling_frame = inspect.currentframe().f_back
+        caller_name = calling_frame.f_code.co_name if calling_frame else ""
+
+        if caller_name != "publish_from_definition":
+            warnings.warn(
+                "Direct publishing through EventBus.publish() is deprecated. " 
+                "Please use EventBus.publish_from_definition() with an EventDefinition class instead.",
+                DeprecationWarning, 
+                stacklevel=2
+            )
+
         start_time = time.time()
 
         # Ensure Kafka client is initialized
@@ -186,7 +245,6 @@ class EventBus:
         processing_time = int((time.time() - start_time) * 1000)
         if hasattr(event, 'metrics') and hasattr(event.metrics, 'processing_time_ms'):
             event.metrics.processing_time_ms = processing_time
-
 
         # Generate proper key for partitioning
         key_bytes = f"{entity_type}.{entity_id}".encode('utf-8') if entity_id else entity_type.encode('utf-8')
@@ -264,7 +322,9 @@ class EventBus:
                     )
                     resp.raise_for_status()
                 except Exception as e:
-                    logger.error(f"Failed to deliver event to {subscriber.callback_url}: {e}")
+                    logger.error(
+                        f"❌ Failed to deliver event to {subscriber.callback_url}: {e}"
+                    )
         except Exception as e:
             logger.error(f"Error processing HTTP subscribers: {e}", exc_info=True)
 
@@ -317,6 +377,16 @@ class EventBus:
 
 # Create global instance
 event_bus = EventBus()
+
+# Export a function to get the broker for external modules
+def get_broker():
+    """Get the Kafka broker instance.
+    
+    This is a convenience function to avoid direct access to the broker.
+    Uses lazy import to avoid circular dependencies.
+    """
+    from ..consumers.kafka import get_kafka_broker
+    return get_kafka_broker()
 
 def get_event_bus():
     """Get the singleton event bus instance."""

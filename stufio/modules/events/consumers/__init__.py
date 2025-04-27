@@ -1,8 +1,7 @@
 """Event consumer modules."""
 
 # Import and apply patching immediately
-from calendar import c
-from .asyncapi import patched_get_schema
+from .asyncapi_patches import patched_get_schema
 
 # Make sure the patch is always applied
 from faststream.kafka.subscriber.asyncapi import AsyncAPIDefaultSubscriber
@@ -21,7 +20,7 @@ def get_kafka_broker():
 
 def get_patched_app_schema():
     """Get the patched schema generator function."""
-    from .asyncapi import get_patched_app_schema as _get_patched_app_schema
+    from .asyncapi_patches import get_patched_app_schema as _get_patched_app_schema
     return _get_patched_app_schema
 
 # Define what's available for import

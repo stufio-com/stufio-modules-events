@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 ASYNCAPI_JS_DEFAULT_URL = "https://unpkg.com/@asyncapi/react-component@1.0.0-next.47/browser/standalone/index.js"
 ASYNCAPI_CSS_DEFAULT_URL = "https://unpkg.com/@asyncapi/react-component@1.0.0-next.46/styles/default.min.css"
 
+
+# Function to generate HTML for AsyncAPI documentation
 def get_asyncapi_html(
     schema: "Schema",
     sidebar: bool = True,

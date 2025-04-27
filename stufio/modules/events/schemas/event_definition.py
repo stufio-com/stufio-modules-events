@@ -5,7 +5,7 @@ from stufio.core.config import get_settings
 from ..utils.context import TaskContext
 
 from .payloads import BaseEventPayload
-from .messages import BaseEventMessage, get_message_class
+from .messages import BaseEventMessage
 from .base import ActorType
 
 # Type variable for better type hinting
@@ -263,6 +263,34 @@ def event(**kwargs):
         return cls
 
     return decorator
+
+
+def get_event_definition_class(name: str) -> Optional[Type[EventDefinition]]:
+    """Find an event definition class by name.
+    
+    This function searches through all registered event definition classes
+    to find one with a matching name.
+    
+    Args:
+        name: The name of the event definition to find
+        
+    Returns:
+        The event definition class if found, None otherwise
+    """
+    for event_class in ALL_EVENTS:
+        try:
+            event_name = event_class._event_attrs.get('name')
+            if event_name == name:
+                return event_class
+        except Exception as e:
+            logger.error(f"Error accessing event class attributes for {event_class}: {e}")
+    
+    # Also try by class name
+    for event_class in ALL_EVENTS:
+        if event_class.__name__ == name:
+            return event_class
+            
+    return None
 
 
 class EventDefinitionValid(BaseModel):

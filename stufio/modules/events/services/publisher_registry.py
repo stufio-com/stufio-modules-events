@@ -209,7 +209,7 @@ def get_publisher_channels() -> Dict[str, Channel]:
 
                 # Create a unique message component name
                 message_component_name = f"{payload_class.__name__}Event" if not "event_def" in info else f"{info['event_def'].__name__}"
-                
+
                 # Create the message component - similar to how subscribers define them
                 message_components[message_component_name] = {
                     "title": message_component_name,
@@ -228,7 +228,7 @@ def get_publisher_channels() -> Dict[str, Channel]:
                         }
                     }
                 }
-                
+
                 # Create AsyncAPI channel that references the message component
                 channels[channel_name] = Channel(
                     description=description,
@@ -240,24 +240,27 @@ def get_publisher_channels() -> Dict[str, Channel]:
                     ),
                 )
                 logger.debug(f"Added publisher channel: {channel_name} with message component: {message_component_name}")
-            
+
             except Exception as e:
-                logger.warning(f"Failed to generate schema for {payload_class.__name__}: {e}")
+                logger.warning(
+                    f"❌ Failed to generate schema for {payload_class.__name__}: {e}"
+                )
 
         except Exception as e:
-            logger.error(f"Failed to create channel for {channel_name}: {e}", exc_info=True)
+            logger.error(
+                f"❌ Failed to create channel for {channel_name}: {e}", exc_info=True
+            )
 
     # Add message components to the AsyncAPI doc
-    from stufio.modules.events.consumers.asyncapi import top_level_schemas_registry
-    
+    from ..consumers.asyncapi_patches import (
+        top_level_schemas_registry,
+        get_patched_app_schema,
+    )
+
     # Add schemas to components.schemas
     for name, schema in top_level_schemas.items():
         top_level_schemas_registry[name] = schema
-    
-    # Add message components to AsyncAPI registry
-    # You need a place to store these message components
-    # Either add to patch_get_app_schema or create a global variable like:
-    from stufio.modules.events.consumers.asyncapi import get_patched_app_schema
+
     setattr(get_patched_app_schema, "message_components", message_components)
 
     return channels

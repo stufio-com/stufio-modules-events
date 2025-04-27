@@ -1,5 +1,5 @@
 from .base import ActorType, Entity, Actor, EventMetrics, EventSubscription, BaseEventPayload
-from .messages import BaseEventMessage, get_message_class
+from .messages import BaseEventMessage
 from .error import ErrorLogCreate, ErrorLogUpdate
 from .event_definition import EventDefinition, event
 from .event import (
@@ -37,6 +37,4 @@ __all__ = [
     # Error logs
     "ErrorLogCreate",
     "ErrorLogUpdate",
-    # Event message types
-    "get_message_class",
 ]

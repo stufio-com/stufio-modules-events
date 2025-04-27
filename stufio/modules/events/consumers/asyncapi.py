@@ -1,6 +1,7 @@
 from typing import Any, Dict, Union, Optional, Type, get_type_hints, get_args, get_origin
 import re
 import inspect
+import logging
 from faststream.asyncapi.schema import Channel, ChannelBinding, CorrelationId, Message, Operation
 from faststream.asyncapi.schema.bindings import kafka
 from faststream.asyncapi.utils import resolve_payloads
@@ -13,180 +14,10 @@ from ..schemas.event_definition import EventDefinition
 from stufio.core.config import get_settings
 from faststream.asyncapi.generate import get_app_schema as original_get_app_schema
 from ..services.publisher_registry import get_publisher_channels
+from .asyncapi_patches import register_channel_info
 
 settings = get_settings()
-
-
-# Store global registry of custom channel information
-channel_registry: Dict[str, Dict[str, Any]] = {}
-
-import logging
 logger = logging.getLogger(__name__)
-
-def register_channel_info(subscriber_name: str, channel_info: Dict[str, Any]) -> None:
-    """Register channel information for a subscriber"""
-    channel_registry[subscriber_name] = channel_info
-
-# Patch AsyncAPIDefaultSubscriber class to use our channel info
-original_get_schema = AsyncAPIDefaultSubscriber.get_schema
-
-
-def get_channel_info(self, subscriber_names) -> Union[Dict[str, Any], None]:
-    # Log what we're looking for
-    logger.debug(f"Looking for subscriber in registry: {subscriber_names}")
-    logger.debug(f"Available channels in registry: {list(channel_registry.keys())}")
-
-    # Try to find the subscriber in our registry
-    found_info = None
-    for name in subscriber_names:
-        if name in channel_registry:
-            found_info = channel_registry[name]
-            logger.debug(f"Found channel info for {name}")
-            break
-
-    # If we found custom channel info, use it
-    if found_info:
-        info = found_info
-        channels = {}
-
-        msg_payloads = []
-        # Use explicit payload class if provided
-        payload_class = info.get("payload_class")
-        payloads = self.get_payloads()
-        if payload_class:
-            logger.debug(f"Using explicit payload class: {payload_class}")
-            for payload_obj in payloads:
-                if payload_class.__name__ == payload_obj[0].get("title") or f"[{payload_class.__name__}]" in payload_obj[0].get("title"):
-                    logger.debug(f"Found matching payload class: {payload_obj}")
-                    msg_payloads.append(payload_obj)
-
-        if len(msg_payloads) == 0:
-            logger.warning(f"Payload class {payload_class} not found in registry")
-            msg_payloads = payloads
-
-        payload = resolve_payloads(msg_payloads)
-
-        # Create proper uri-template compatible channel name
-        channel_name = info.get("channel")
-        if channel_name:
-            # Normalize channel name
-            # if not channel_name.startswith('/'):
-            #     channel_name = f"/{channel_name}"
-
-            # Replace any invalid URI template characters
-            channel_name = re.sub(r'[^a-zA-Z0-9_\-\.\/\{\}]', '_', channel_name)
-
-            # Create the channel with proper schema using our payload
-            channels[channel_name] = Channel(
-                description=info.get("description", self.description),
-                subscribe=Operation(
-                    message=Message(
-                        title=info.get(
-                            "title", f"{self.call_name}:Message"
-                        ),
-                        payload=payload,  # Use our determined payload
-                        correlationId=CorrelationId(
-                            location="$message.header#/correlation_id"
-                        ),
-                        # Add message headers - uncomment and fix these
-                        headers={
-                            "entity_type": MessageHeader(
-                                location="$message.header#/entity_type",
-                                description="Entity type of the message",
-                            ),
-                            "action": MessageHeader(
-                                location="$message.header#/action",
-                                description="Action performed on the entity",
-                            ),
-                        },
-                    ),
-                ),
-                bindings=ChannelBinding(
-                    kafka=kafka.ChannelBinding(
-                        topic=next(iter(self.topics), ""),
-                        # Include filter metadata for documentation
-                        x_filter=info.get("filter_kwargs"),
-                    ),
-                ),
-            )
-            logger.debug(f"Created custom channel schema for {channel_name}")
-            return channels
-
-    # Fall back to creating a valid channel name even without registry info
-    channels = {}
-    handler_name = self.title_ or f"{next(iter(self.topics), '')}:{self.call_name}"
-
-    # Fix: Break into separate steps to avoid backslash in f-string
-    processed_name = handler_name.lower()
-    processed_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', processed_name)
-    processed_name = processed_name.replace(':', '/')
-    valid_channel_name = f"{processed_name}"
-
-    # Create a channel with proper URI template format
-    channels[valid_channel_name] = Channel(
-        description=self.description,
-        subscribe=Operation(
-            message=Message(
-                title=f"{handler_name}:Message",
-                payload=resolve_payloads(self.get_payloads()),
-                correlationId=CorrelationId(location="$message.header#/correlation_id"),
-                # Add message headers - uncomment and fix these
-                headers={
-                    "entity_type": MessageHeader(
-                        location="$message.header#/entity_type",
-                        description="Entity type of the message",
-                    ),
-                    "action": MessageHeader(
-                        location="$message.header#/action",
-                        description="Action performed on the entity",
-                    ),
-                },
-            ),
-        ),
-        bindings=ChannelBinding(
-            kafka=kafka.ChannelBinding(
-                topic=next(iter(self.topics), ""),
-            ),
-        ),
-    )
-
-    return channels
-
-
-# Modify the patched_get_schema function to better handle channel naming
-def patched_get_schema(self):
-    """Patched get_schema method that uses our channel registry"""
-
-    # # Try different subscriber name formats to match registry entries
-    # subscriber_names = [
-    #     f"{','.join(self.topics)}:{self.call_name}",  # Standard format
-    #     f"{next(iter(self.topics), '')}:{self.call_name}",  # Single topic format
-    #     self.call_name,  # Just function name
-    # ]
-
-
-    channels = {}
-
-    if self.calls:
-        for call in self.calls:
-            call_subscriber_names = []
-            call_name = getattr(call, "call_name", "")
-            if call_name:
-                call_subscriber_names.append(f"{next(iter(self.topics), '')}:{call_name}")
-                call_subscriber_names.append(f"{','.join(self.topics)}:{call_name}")
-                call_subscriber_names.append(call_name)
-
-                channel_info = get_channel_info(self, call_subscriber_names)
-                if channel_info:
-                    for channel_name, channel in channel_info.items():
-                        # Add the channel to the schema
-                        channels[channel_name] = channel
-                        logger.debug(f"Added custom channel schema for {channel_name}")
-
-    return channels
-
-# Apply our patch
-AsyncAPIDefaultSubscriber.get_schema = patched_get_schema
 
 
 def extract_payload_class(func):
@@ -226,6 +57,7 @@ def extract_payload_class(func):
         logger.warning(f"Error extracting payload class: {e}")
         return None
 
+
 # Create a custom decorator wrapper around the broker's subscriber method
 def stufio_subscriber(
     *topics: str,
@@ -239,6 +71,12 @@ def stufio_subscriber(
     include_in_schema: bool = True,
     event_id: Optional[str] = None,
     payload_class: Optional[Type] = None,  # Add payload_class parameter
+    # Add explicit consumer config params
+    max_poll_interval_ms: Optional[int] = None,
+    session_timeout_ms: Optional[int] = None,
+    heartbeat_interval_ms: Optional[int] = None,
+    auto_commit_interval_ms: Optional[int] = None,
+    auto_offset_reset: Optional[str] = None,
     **kwargs: Any,
 ) -> Any:
     """Enhanced subscriber decorator that properly sets channel names for AsyncAPI schema."""
@@ -247,13 +85,17 @@ def stufio_subscriber(
         from stufio.modules.events.consumers.kafka import get_kafka_router
         broker = get_kafka_router()
 
-    # Instead of setting a consumer_config dictionary, set individual parameters
-    # Extract Kafka consumer settings from settings
-    max_poll_interval_ms = getattr(settings, "events_KAFKA_MAX_POLL_INTERVAL_MS", 300000)
-    session_timeout_ms = getattr(settings, "events_KAFKA_SESSION_TIMEOUT_MS", 60000)
-    heartbeat_interval_ms = getattr(settings, "events_KAFKA_HEARTBEAT_INTERVAL_MS", 20000)
-    auto_commit_interval_ms = getattr(settings, "events_KAFKA_AUTO_COMMIT_INTERVAL_MS", 5000)
-    auto_offset_reset = getattr(settings, "events_KAFKA_AUTO_OFFSET_RESET", "earliest")
+    # Extract Kafka consumer settings from settings if not explicitly provided
+    if max_poll_interval_ms is None:
+        max_poll_interval_ms = getattr(settings, "events_KAFKA_MAX_POLL_INTERVAL_MS", 300000)
+    if session_timeout_ms is None:
+        session_timeout_ms = getattr(settings, "events_KAFKA_SESSION_TIMEOUT_MS", 60000)
+    if heartbeat_interval_ms is None:
+        heartbeat_interval_ms = getattr(settings, "events_KAFKA_HEARTBEAT_INTERVAL_MS", 20000)
+    if auto_commit_interval_ms is None:
+        auto_commit_interval_ms = getattr(settings, "events_KAFKA_AUTO_COMMIT_INTERVAL_MS", 5000)
+    if auto_offset_reset is None:
+        auto_offset_reset = getattr(settings, "events_KAFKA_AUTO_OFFSET_RESET", "earliest")
 
     # Set these parameters directly in kwargs
     kwargs["max_poll_interval_ms"] = max_poll_interval_ms
@@ -311,9 +153,10 @@ def stufio_subscriber(
         }
 
         # Create a more unique key if event_id is provided
-        unique_key = f"{event_id}:{func.__name__}"
-        register_channel_info(unique_key, channel_info)
-        logger.debug(f"Registered channel info with event-specific key: {unique_key}")
+        unique_key = f"{event_id}:{func.__name__}" if event_id else None
+        if unique_key:
+            register_channel_info(unique_key, channel_info)
+            logger.debug(f"Registered channel info with event-specific key: {unique_key}")
 
         # Register with multiple keys to increase chances of finding it
         register_channel_info(subscriber_name, channel_info)
@@ -346,6 +189,12 @@ def stufio_event_subscriber(
     description: Optional[str] = None,
     include_in_schema: bool = True,
     title: Optional[str] = None,
+    # Add explicit consumer config params
+    max_poll_interval_ms: Optional[int] = None,
+    session_timeout_ms: Optional[int] = None,
+    heartbeat_interval_ms: Optional[int] = None,
+    auto_commit_interval_ms: Optional[int] = None,
+    auto_offset_reset: Optional[str] = None,
     **kwargs: Any,
 ) -> Any:
     """Enhanced subscriber decorator that properly sets channel names for AsyncAPI schema."""
@@ -411,66 +260,13 @@ def stufio_event_subscriber(
             event_id=event_id,
             group_id=group_id,
             payload_class=payload_class,
+            max_poll_interval_ms=max_poll_interval_ms,
+            session_timeout_ms=session_timeout_ms,
+            heartbeat_interval_ms=heartbeat_interval_ms,
+            auto_commit_interval_ms=auto_commit_interval_ms,
+            auto_offset_reset=auto_offset_reset,
             **kwargs
         )(func)  # Apply directly to the original function
 
     return decorator
 
-
-# Add a global registry for top-level schemas
-top_level_schemas_registry: Dict[str, Any] = {}
-
-# Then modify the get_patched_app_schema function to include these schemas
-def get_patched_app_schema(router):
-    """Get AsyncAPI schema with our custom patches applied."""
-    # Force applying our patch if not already applied
-    if AsyncAPIDefaultSubscriber.get_schema != patched_get_schema:
-        AsyncAPIDefaultSubscriber.get_schema = patched_get_schema
-
-    # Log registered channels for debugging
-    logger.info(f"Registered channels: {list(channel_registry.keys())}")
-
-    schema = original_get_app_schema(router)
-    
-    # Add publisher channels
-    publisher_channels = get_publisher_channels()
-    
-    # Get the message components that were created
-    message_components = getattr(get_patched_app_schema, "message_components", {})
-    
-    # Merge channels
-    if hasattr(schema, "channels"):
-        schema.channels.update(publisher_channels)
-    
-    # Make sure components exist
-    if not hasattr(schema, "components"):
-        from faststream.asyncapi.schema import Components
-        schema.components = Components()
-    
-    # Make sure components.messages exists
-    if not hasattr(schema.components, "messages"):
-        schema.components.messages = {}
-    
-    # Add message components to components.messages
-    schema.components.messages.update(message_components)
-    
-    # Add publisher channels to the schema
-    publisher_channels = get_publisher_channels()
-
-    # Merge channels
-    if hasattr(schema, "channels"):
-        schema.channels.update(publisher_channels)
-
-    # Add our top-level schemas to the components.schemas section
-    if not hasattr(schema, "components"):
-        from faststream.asyncapi.schema import Components
-        schema.components = Components()
-
-    if not hasattr(schema.components, "schemas"):
-        schema.components.schemas = {}
-
-    # Merge collected top-level schemas
-    schema.components.schemas.update(top_level_schemas_registry)
-
-    logger.warning(f"Generated AsyncAPI schema with {len(schema.channels)} channels")
-    return schema

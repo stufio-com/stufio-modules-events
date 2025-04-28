@@ -189,6 +189,7 @@ def stufio_event_subscriber(
     description: Optional[str] = None,
     include_in_schema: bool = True,
     title: Optional[str] = None,
+    track_metrics: bool = True,  # Add parameter to control metrics tracking
     # Add explicit consumer config params
     max_poll_interval_ms: Optional[int] = None,
     session_timeout_ms: Optional[int] = None,
@@ -229,7 +230,7 @@ def stufio_event_subscriber(
     def decorator(func):
         # Now we have access to the function name
         func_name = func.__name__
-        nonlocal event, topics, broker, channel, group_id, title, description, include_in_schema, filter, filter_kwargs, event_id, payload_class
+        nonlocal event, topics, broker, channel, group_id, title, description, include_in_schema, filter, filter_kwargs, event_id, payload_class, track_metrics
 
         if group_id is None:
             group_id = f"{settings.events_KAFKA_GROUP_ID}.{event.entity_type}.{event.action}"
@@ -245,6 +246,15 @@ def stufio_event_subscriber(
             channel = f"{settings.events_ASYNCAPI_PREFIX}.{entity_type}.{action}"
 
         logger.debug(f"Using channel name: {channel} for event {event.__name__} function {func_name}")
+
+        # Apply metrics tracking if enabled
+        if track_metrics:
+            from ..decorators.metrics import track_handler_metrics
+            # Extract module name from event definition
+            module_name = event.entity_type
+            # Apply metrics tracking decorator
+            func = track_handler_metrics(module_name=module_name)(func)
+            logger.debug(f"Applied metrics tracking decorator to {func_name}")
 
         # Important - DON'T wrap the handler function, just pass it directly
         # This preserves the argument signatures expected by FastStream
@@ -269,4 +279,3 @@ def stufio_event_subscriber(
         )(func)  # Apply directly to the original function
 
     return decorator
-

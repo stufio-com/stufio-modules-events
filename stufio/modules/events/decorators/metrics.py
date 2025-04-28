@@ -162,6 +162,20 @@ def extract_metrics_from_result(result: Any) -> Dict[str, Any]:
     # No metrics found
     return {}
 
+def _extract_event(*args, **kwargs) -> Optional[BaseEventMessage]:
+    """Extract event from args or kwargs."""
+    # Check args for event
+    for arg in args:
+        if isinstance(arg, BaseEventMessage):
+            return arg
+
+    # Check kwargs for event
+    for arg in kwargs.values():
+        if isinstance(arg, BaseEventMessage):
+            return arg
+
+    return None
+
 
 def track_handler_metrics(module_name: str = "unknown"):
     """Decorator to track metrics for event handlers."""
@@ -169,39 +183,43 @@ def track_handler_metrics(module_name: str = "unknown"):
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
             # Get event from args - typically first argument for handler
-            event = None
-            for arg in args:
-                if isinstance(arg, BaseEventMessage):
-                    event = arg
-                    break
-            
+            event = _extract_event(*args, **kwargs)
+
+            if not event:
+                return await func(*args, **kwargs)
+
             # Reset all metrics before handler execution
             await reset_all_metrics()
 
             # Extract IDs and timestamp for tracking
             event_id = getattr(event, "event_id", None) if event else None
-            correlation_id = TaskContext.get_correlation_id()
-            
+            correlation_id = (
+                getattr(event, "correlation_id", TaskContext.get_correlation_id())
+                if event
+                else TaskContext.get_correlation_id()
+            )
+
             # Extract event timestamp for latency calculation
             event_timestamp = None
             if event and hasattr(event, "timestamp"):
                 event_timestamp = parse_event_timestamp(event.timestamp)
-            
+
             # Get function details
             consumer_name = func.__qualname__
-            
+            consumer_module_name = module_name or func.__module__
+
             # Timing
             start_time = time.time()
             success = True
             error_msg = None
-            
+
             try:
                 # Execute the handler
                 result = await func(*args, **kwargs)
-                
+
                 # Extract metrics from the result
                 custom_metrics = extract_metrics_from_result(result)
-                
+
                 return result
             except Exception as e:
                 success = False
@@ -209,7 +227,7 @@ def track_handler_metrics(module_name: str = "unknown"):
                 raise
             finally:
                 end_time = time.time()
-                
+
                 # Save metrics in the background
                 if event_id:
                     asyncio.create_task(
@@ -218,29 +236,31 @@ def track_handler_metrics(module_name: str = "unknown"):
                             correlation_id=correlation_id,
                             source_type="consumer",
                             consumer_name=consumer_name,
-                            module_name=module_name,
+                            module_name=consumer_module_name,
                             event_timestamp=event_timestamp,
                             started_at=start_time,
                             completed_at=end_time,
                             success=success,
                             error_message=error_msg,
-                            metrics=custom_metrics
+                            metrics=custom_metrics,
                         )
                     )
-        
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
             # Get event from args
-            event = None
-            for arg in args:
-                if isinstance(arg, BaseEventMessage):
-                    event = arg
-                    break
-                    
-            # Extract IDs for tracking
+            event = _extract_event(*args, **kwargs)
+            if not event:
+                return func(*args, **kwargs)
+
+            # Extract IDs and timestamp for tracking
             event_id = getattr(event, "event_id", None) if event else None
-            correlation_id = TaskContext.get_correlation_id()
-            
+            correlation_id = (
+                getattr(event, "correlation_id", TaskContext.get_correlation_id())
+                if event
+                else TaskContext.get_correlation_id()
+            )
+
             # Extract event timestamp for latency calculation
             event_timestamp = None
             if event and hasattr(event, "timestamp"):
@@ -248,7 +268,8 @@ def track_handler_metrics(module_name: str = "unknown"):
 
             # Get function details
             consumer_name = func.__qualname__
-            
+            consumer_module_name = module_name or func.__module__
+
             # Reset metrics - need to run in event loop
             try:
                 loop = asyncio.get_event_loop()
@@ -256,19 +277,19 @@ def track_handler_metrics(module_name: str = "unknown"):
                     loop.create_task(reset_all_metrics())
             except Exception:
                 pass
-            
+
             # Timing
             start_time = time.time()
             success = True
             error_msg = None
-            
+
             try:
                 # Execute the handler
                 result = func(*args, **kwargs)
-                
+
                 # Extract metrics from the result
                 custom_metrics = extract_metrics_from_result(result)
-                
+
                 return result
             except Exception as e:
                 success = False
@@ -276,7 +297,7 @@ def track_handler_metrics(module_name: str = "unknown"):
                 raise
             finally:
                 end_time = time.time()
-                
+
                 # Save metrics directly (can't create background task in sync code)
                 if event_id:
                     # Use asyncio event loop to save metrics if available
@@ -289,13 +310,13 @@ def track_handler_metrics(module_name: str = "unknown"):
                                     correlation_id=correlation_id,
                                     source_type="consumer",
                                     consumer_name=consumer_name,
-                                    module_name=module_name,
+                                    module_name=consumer_module_name,
                                     event_timestamp=event_timestamp,
                                     started_at=start_time,
                                     completed_at=end_time,
                                     success=success,
                                     error_message=error_msg,
-                                    metrics=custom_metrics
+                                    metrics=custom_metrics,
                                 )
                             )
                     except Exception:
@@ -304,7 +325,7 @@ def track_handler_metrics(module_name: str = "unknown"):
         # Return appropriate wrapper based on function type
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
-        
+
         return sync_wrapper
-    
+
     return decorator

@@ -87,7 +87,7 @@ class HandlerResponse(FastStreamResponse):
             correlation_id: Correlation ID for the response
         """
         # Initialize FastStreamResponse with the result as body
-        super().__init__(body=result, headers=headers, correlation_id=correlation_id, **kwargs=kwargs)
+        super().__init__(body=result, headers=headers, correlation_id=correlation_id, **kwargs)
 
         # Store additional properties specific to HandlerResponse
         self.handler_result = result
@@ -118,51 +118,12 @@ class HandlerResponse(FastStreamResponse):
             return lambda: self.handler_result
         raise AttributeError(f"{self.__class__.__name__} has no attribute {name}")
 
-    def _process_metrics(self, handler_name: Optional[str] = None) -> None:
-        """Process metrics"""
-        if not self.handler_metrics or not self.correlation_id:
-            return
-
-        try:
-            from ..decorators.metrics import save_event_metrics
-
-            # Extract metrics from handler_metrics
-            metrics_data = {}
-            if hasattr(self.handler_metrics, "dict"):
-                metrics_data = self.handler_metrics.dict()
-            elif hasattr(self.handler_metrics, "model_dump"):
-                metrics_data = self.handler_metrics.model_dump()
-            elif isinstance(self.handler_metrics, dict):
-                metrics_data = self.handler_metrics
-
-            # Get response handler name if available
-            module_name = "events"
-
-            # Get the current time for metrics
-            current_time = time.time()
-            started_at = getattr(self, "response_time", current_time - 0.001)
-            
-            save_event_metrics(
-                event_id=self.event_id or 'unknown_event_id',  # Generate UUID if not available
-                correlation_id=self.correlation_id,
-                source_type="handler",
-                consumer_name=handler_name or "unknown_handler",
-                module_name=module_name,
-                event_timestamp=self.response_time,
-                started_at=started_at,
-                completed_at=current_time,
-                success=True,  # Assume success if we reached this point
-                error_message=None,
-                metrics=metrics_data
-            )
-
-        except Exception as e:
-            logger.error(f"Error processing publish events: {e}", exc_info=True)
             
     def after_consume(self, msg: StreamMessage, handler_name: Optional[str] = None) -> None:
         """Override after_consume to process metrics and publish events."""
         # Call the parent method to ensure proper handling
-        super().after_consume(msg)
+        if hasattr(super(), "after_consume"):
+            super().after_consume(msg)
         
         if not self.correlation_id:
             decoded_body = msg.decoded_body()
@@ -173,15 +134,6 @@ class HandlerResponse(FastStreamResponse):
                 # Generate a new correlation ID if not provided
                 self.correlation_id = str(TaskContext.get_correlation_id())
                 
-        if not self.event_id:
-            # Use the event ID from the message if available
-            self.event_id = str(msg.decoded_message.event_id)
-        else:
-            # Generate a new event ID if not provided
-            self.event_id = 'unknown_event_id'
-                
-        # Process metrics
-        self._process_metrics(handler_name)
 
         # Process publish events
         self._process_publish_events()

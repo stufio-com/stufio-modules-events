@@ -65,7 +65,8 @@ try:
     )
 
     LEGACY_METRICS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.warning(f"Legacy metrics utilities not available. Error: {e}")
     LEGACY_METRICS_AVAILABLE = False
 
 

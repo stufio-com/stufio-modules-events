@@ -174,13 +174,14 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
         return payload_class
 
     @classmethod
-    async def publish(cls, 
-                     entity_id: Optional[str] = None,
-                     actor_type: Optional[Union[str, ActorType]] = None,
-                     actor_id: Optional[str] = None,
-                     payload: Optional[Union[Dict[str, Any], BaseEventPayload, BaseModel]] = None,
-                     correlation_id: Optional[str] = None,
-                     metrics: Optional[Dict[str, Any]] = None):
+    async def publish(
+        cls,
+        entity_id: Optional[str] = None,
+        actor_type: Optional[Union[str, ActorType]] = None,
+        actor_id: Optional[str] = None,
+        payload: Optional[Union[Dict[str, Any], BaseEventPayload, BaseModel]] = None,
+        correlation_id: Optional[str] = None,
+    ) -> BaseEventMessage:
         """Publish an event with the current event definition."""
         # Import inside function to avoid circular imports
         from ..services.event_bus import get_event_bus
@@ -193,7 +194,6 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
 
         if not name or not entity_type or not action:
             raise ValueError(f"Event definition {cls.__name__} is missing required attributes")
-
 
         # Get payload class with fallback
         payload_class = cls.get_payload_class()
@@ -243,7 +243,6 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
             actor_id=actor_id,
             payload=processed_payload,
             correlation_id=correlation_id,  # Use correlation ID from TaskContext
-            metrics=metrics,
             payload_class=payload_class  
         )
 

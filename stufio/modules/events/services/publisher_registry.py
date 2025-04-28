@@ -188,14 +188,14 @@ def get_publisher_channels() -> Dict[str, Channel]:
                             ],
                             "description": "Event payload data"
                         },
-                        "metrics": {
-                            "anyOf": [
-                                {"$ref": "#/components/schemas/EventMetrics"},
-                                {"type": "null"}
-                            ],
-                            "default": None,
-                            "description": "Event performance metrics"
-                        }
+                        # "metrics": {
+                        #     "anyOf": [
+                        #         {"$ref": "#/components/schemas/EventMetrics"},
+                        #         {"type": "null"}
+                        #     ],
+                        #     "default": None,
+                        #     "description": "Event performance metrics"
+                        # }
                     },
                     "required": ["timestamp", "entity", "action", "actor", "payload"]
                 }
@@ -318,41 +318,41 @@ def register_standard_schemas(top_level_schemas: Dict[str, Any]) -> None:
         }
 
     # Register EventMetrics schema if needed
-    if "EventMetrics" not in top_level_schemas:
-        top_level_schemas["EventMetrics"] = {
-            "description": "Performance metrics for event processing.",
-            "properties": {
-                "processing_time_ms": {
-                    "anyOf": [{"type": "integer"}, {"type": "null"}],
-                    "default": None,
-                    "description": "Processing time in milliseconds",
-                    "title": "Processing Time Ms"
-                },
-                "db_time_ms": {
-                    "anyOf": [{"type": "integer"}, {"type": "null"}],
-                    "default": None,
-                    "description": "Database operation time in milliseconds",
-                    "title": "Db Time Ms"
-                },
-                "api_time_ms": {
-                    "anyOf": [{"type": "integer"}, {"type": "null"}],
-                    "default": None,
-                    "description": "External API time in milliseconds",
-                    "title": "Api Time Ms"
-                },
-                "queue_time_ms": {
-                    "anyOf": [{"type": "integer"}, {"type": "null"}],
-                    "default": None,
-                    "description": "Time spent in queue",
-                    "title": "Queue Time Ms"
-                },
-                "custom_metrics": {
-                    "anyOf": [{"type": "object"}, {"type": "null"}],
-                    "default": None,
-                    "description": "Custom service-specific metrics",
-                    "title": "Custom Metrics"
-                }
-            },
-            "title": "EventMetrics",
-            "type": "object"
-        }
+    # if "EventMetrics" not in top_level_schemas:
+    #     top_level_schemas["EventMetrics"] = {
+    #         "description": "Performance metrics for event processing.",
+    #         "properties": {
+    #             "processing_time_ms": {
+    #                 "anyOf": [{"type": "integer"}, {"type": "null"}],
+    #                 "default": None,
+    #                 "description": "Processing time in milliseconds",
+    #                 "title": "Processing Time Ms"
+    #             },
+    #             "db_time_ms": {
+    #                 "anyOf": [{"type": "integer"}, {"type": "null"}],
+    #                 "default": None,
+    #                 "description": "Database operation time in milliseconds",
+    #                 "title": "Db Time Ms"
+    #             },
+    #             "api_time_ms": {
+    #                 "anyOf": [{"type": "integer"}, {"type": "null"}],
+    #                 "default": None,
+    #                 "description": "External API time in milliseconds",
+    #                 "title": "Api Time Ms"
+    #             },
+    #             "queue_time_ms": {
+    #                 "anyOf": [{"type": "integer"}, {"type": "null"}],
+    #                 "default": None,
+    #                 "description": "Time spent in queue",
+    #                 "title": "Queue Time Ms"
+    #             },
+    #             "custom_metrics": {
+    #                 "anyOf": [{"type": "object"}, {"type": "null"}],
+    #                 "default": None,
+    #                 "description": "Custom service-specific metrics",
+    #                 "title": "Custom Metrics"
+    #             }
+    #         },
+    #         "title": "EventMetrics",
+    #         "type": "object"
+    #     }

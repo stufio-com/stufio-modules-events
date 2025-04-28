@@ -13,12 +13,23 @@ async def publish_event(
     actor_id: Optional[str] = None,
     payload: Optional[Dict[str, Any]] = None,
     correlation_id: Optional[str] = None,
-    metrics: Optional[Dict[str, Any]] = None,
     payload_class: Optional[Type[BaseEventPayload]] = None,
-    custom_headers: Optional[Dict[str, str]] = None  # Added parameter
+    custom_headers: Optional[Dict[str, str]] = None
 ):
+    """Helper function to publish an event from any module.
+    
+    Args:
+        event_def: Event definition class
+        entity_id: ID of the entity this event is about
+        actor_type: Type of actor that triggered the event
+        actor_id: ID of the actor that triggered the event
+        payload: Event payload data
+        correlation_id: Correlation ID for tracking related events
+        payload_class: Optional class to validate the payload
+        custom_headers: Optional custom headers to include with the message
+    """
     event_bus = get_event_bus()
-    """Helper function to publish an event from any module."""
+    
     return await event_bus.publish_from_definition(
         event_def=event_def,
         entity_id=entity_id,
@@ -26,9 +37,8 @@ async def publish_event(
         actor_id=actor_id,
         payload=payload,
         correlation_id=correlation_id,
-        metrics=metrics,
         payload_class=payload_class,
-        custom_headers=custom_headers  # Pass custom headers
+        custom_headers=custom_headers
     )
 
 

@@ -11,10 +11,14 @@ import traceback
 import logging
 import time
 from datetime import datetime
+from typing import Optional
 
+from bson import timestamp
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 import uuid
+
+from stufio.modules.events.decorators.metrics import save_event_metrics
 
 from ..utils.context import TaskContext
 from .base import BaseStufioMiddleware
@@ -81,7 +85,7 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                 if not user_id:
                     client_ip = self._get_client_ip(request)
                     user_id = f"anon-{client_ip}"
-                
+
                 # Ensure user_id is a string, not an ObjectId or other type
                 if not isinstance(user_id, str):
                     user_id = self._ensure_string_id(user_id)
@@ -112,26 +116,26 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                     actor_id=user_id,  # Now guaranteed to be a string
                 )
 
-                # Async task to save error log to database
-                asyncio.create_task(crud_error_log.create(error_log))
+                # Important: For errors, directly await the database operation to ensure it completes
+                # This is critical information we don't want to lose if the request is terminated
+                await crud_error_log.create(error_log)
 
-                # Publish system error event
-                asyncio.create_task(
-                    SystemErrorEvent.publish(
-                        entity_id="api_error",
-                        actor_type=ActorType.SYSTEM,
-                        actor_id="middleware",
-                        payload=SystemErrorPayload(
-                            error_type="http_error",
-                            error_message=str(exception),
-                            severity="critical",
-                            stacktrace=error_stack,
-                        ),
-                        correlation_id=correlation_id,
-                    )
+                # Publish the error event
+                await SystemErrorEvent.publish(
+                    entity_id="api_error",
+                    actor_type=ActorType.SYSTEM,
+                    actor_id="middleware",      
+                    payload=SystemErrorPayload(
+                        error_type="middleware_exception",
+                        error_message=str(exception),
+                        severity="critical",
+                        stacktrace=error_stack,
+                    ),
+                    correlation_id=correlation_id
                 )
             except Exception as e:
-                logger.error(f"❌ Failed to track error: {e}", exc_info=True)
+                # For critical error handling failures, await the log to ensure it's recorded
+                await asyncio.to_thread(logger.error, f"❌ Failed to track error: {e}", exc_info=True)
 
         return response
 
@@ -171,8 +175,6 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
             try:
                 # Import metrics module and reset request-specific counters
                 from stufio.db.metrics import reset_request_metrics
-                # Store initial state and timestamp
-                request.state.db_metrics_start_time = time.time()
                 # Reset per-request metrics counters
                 await reset_request_metrics()
             except ImportError:
@@ -185,49 +187,10 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
     ) -> None:
         """
         Track request metrics and publish events after processing.
+
+        Uses background tasks for non-critical operations to avoid blocking the response.
         """
-        # Collect database metrics if enabled
-        db_metrics = {}
-        if self.track_db_metrics:
-            try:
-                # Import metrics module
-                from stufio.db.metrics import get_request_metrics
-
-                # Get metrics for this specific request
-                request_metrics = await get_request_metrics()
-
-                # Extract detailed metrics
-                clickhouse_metrics = request_metrics["clickhouse"]
-                mongo_metrics = request_metrics["mongo"]
-                redis_metrics = request_metrics["redis"]
-
-                # Populate metrics with detailed database information - use structured format
-                db_metrics = {
-                    "mongodb": {
-                        "queries": mongo_metrics["queries"],
-                        "time_ms": int(mongo_metrics["time_ms"]),
-                        "slow_queries": mongo_metrics.get("slow_queries", 0),
-                        "operation_types": mongo_metrics.get("operation_types", {}),
-                        "collection_stats": mongo_metrics.get("collection_stats", {})
-                    },
-                    "clickhouse": {
-                        "queries": clickhouse_metrics["queries"], 
-                        "time_ms": int(clickhouse_metrics["time_ms"]),
-                        "slow_queries": clickhouse_metrics.get("slow_queries", 0),
-                        "query_types": clickhouse_metrics.get("query_types", {})
-                    },
-                    "redis": {
-                        "operations": redis_metrics["operations"],
-                        "time_ms": int(redis_metrics["time_ms"]),
-                        "slow_operations": redis_metrics.get("slow_operations", 0),
-                        "command_types": redis_metrics.get("command_types", {})
-                    }
-                }
-            except ImportError:
-                logger.debug("Database metrics module not available")
-            except Exception as e:
-                logger.error(f"Error collecting database metrics: {e}", exc_info=True)
-
+        # Skip if tracking is disabled
         if not self.track_api_events:
             return
 
@@ -251,31 +214,75 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
             # Convert to milliseconds for metrics
             process_time_ms = int(process_time * 1000)
 
-            # Track API request event
+            # Collect database metrics if enabled - do this part synchronously
+            # as we need these metrics for the tracking task
+            db_metrics = {}
+            # if self.track_db_metrics:
+            #     try:
+            #         # Import metrics module
+            #         from stufio.db.metrics import get_request_metrics
+
+            #         # Get metrics for this specific request
+            #         request_metrics = await get_request_metrics()
+
+            #         # Extract detailed metrics
+            #         clickhouse_metrics = request_metrics["clickhouse"]
+            #         mongo_metrics = request_metrics["mongo"]
+            #         redis_metrics = request_metrics["redis"]
+
+            #         # Populate metrics with detailed database information - use structured format
+            #         db_metrics = {
+            #             "mongodb": {
+            #                 "queries": mongo_metrics["queries"],
+            #                 "time_ms": int(mongo_metrics["time_ms"]),
+            #                 "slow_queries": mongo_metrics.get("slow_queries", 0),
+            #                 "operation_types": mongo_metrics.get("operation_types", {}),
+            #                 "collection_stats": mongo_metrics.get("collection_stats", {})
+            #             },
+            #             "clickhouse": {
+            #                 "queries": clickhouse_metrics["queries"],
+            #                 "time_ms": int(clickhouse_metrics["time_ms"]),
+            #                 "slow_queries": clickhouse_metrics.get("slow_queries", 0),
+            #                 "query_types": clickhouse_metrics.get("query_types", {})
+            #             },
+            #             "redis": {
+            #                 "operations": redis_metrics["operations"],
+            #                 "time_ms": int(redis_metrics["time_ms"]),
+            #                 "slow_operations": redis_metrics.get("slow_operations", 0),
+            #                 "command_types": redis_metrics.get("command_types", {})
+            #             }
+            #         }
+            #     except ImportError:
+            #         logger.debug("Database metrics module not available")
+            #     except Exception as e:
+            #         logger.error(f"Error collecting database metrics: {e}", exc_info=True)
+
             asyncio.create_task(
                 self._track_api_request(
                     request=request,
                     response=response,
+                    correlation_id=correlation_id,
                     user_id=user_id,
                     client_ip=client_ip,
                     user_agent=user_agent,
                     path=path,
-                    method=method,
+                    method=method,  
                     status_code=status_code,
                     process_time_ms=process_time_ms,
-                    correlation_id=correlation_id,
                     is_authenticated=is_authenticated,
                     db_metrics=db_metrics
                 )
             )
 
         except Exception as e:
-            logger.error(f"Error in event tracking: {e}", exc_info=True)
+            # Don't block the response flow - log the error and continue
+            logger.error(f"Error setting up event tracking: {e}", exc_info=True)
 
     async def _track_api_request(
         self,
         request: Request,
         response: Response,
+        correlation_id: str,
         user_id: str,
         client_ip: str,
         user_agent: str,
@@ -283,7 +290,6 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
         method: str,
         status_code: int,
         process_time_ms: int,
-        correlation_id: str,
         is_authenticated: bool = False,
         db_metrics: dict = None
     ):
@@ -292,18 +298,6 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
             # Convert ObjectId to string if necessary
             if hasattr(user_id, "__str__") and not isinstance(user_id, str):
                 user_id = str(user_id)
-
-            # Ensure correlation_id is a valid UUID
-            try:
-                if correlation_id:
-                    correlation_id = str(uuid.UUID(correlation_id))
-                else:
-                    uuid_correlation_id = uuid.uuid4()
-                    correlation_id = str(uuid_correlation_id)
-                    TaskContext.set_correlation_id(uuid_correlation_id)
-            except ValueError:
-                # If correlation_id is not a valid UUID, generate a new one
-                correlation_id = str(uuid.uuid4())
 
             # Extract the entity type from the URL path
             path_parts = path.strip("/").split("/")
@@ -372,115 +366,52 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                 is_authenticated=is_authenticated,
             )
 
-            # Generate event_id for the API request
-            event_id = str(uuid.uuid4())
-            timestamp = time.time()
-            timestamp_dt = datetime.utcfromtimestamp(timestamp)
+            # # Create async tasks for both operations to run in parallel
+            # await self._save_event_metrics(
+            #     event_id=event_id,
+            #     correlation_id=correlation_id,
+            #     path=path,
+            #     method=method,
+            #     status_code=status_code,
+            #     process_time_ms=process_time_ms,
+            #     timestamp=timestamp,
+            #     response_size=response_size,
+            #     error_info=error_info,
+            #     db_metrics=db_metrics,
+            # )
 
-            # 1. Save API log entry using CRUD pattern instead of direct SQL
-            try:
-                # Format headers and query params as JSON strings for storage
-                headers_json = json.dumps(dict(request.headers))
-                query_params_json = json.dumps(dict(request.query_params))
-
-                # Create event_api_log model and use CRUD to save it
-                # This part would need a proper model and CRUD implementation similar to event_metrics
-                # For this refactoring we'll focus on the metrics part
-
-                # 2. Save metrics data using our new CRUD pattern
-                # Calculate start and end time
-                end_time = timestamp
-                start_time = end_time - (process_time_ms / 1000)
-
-                # Get tenant from settings
-                tenant = getattr(settings, "APP_NAME", "unknown")
-
-                # Extract DB metrics from the metrics object
-                mongodb_queries = 0
-                mongodb_time_ms = 0
-                mongodb_slow_queries = 0
-                clickhouse_queries = 0
-                clickhouse_time_ms = 0
-                clickhouse_slow_queries = 0
-                redis_operations = 0
-                redis_time_ms = 0
-                redis_slow_operations = 0
-
-                if db_metrics:
-                    if "mongodb" in db_metrics:
-                        mongodb_queries = db_metrics["mongodb"]["queries"]
-                        mongodb_time_ms = db_metrics["mongodb"]["time_ms"]
-                        mongodb_slow_queries = db_metrics["mongodb"]["slow_queries"]
-
-                    if "clickhouse" in db_metrics:
-                        clickhouse_queries = db_metrics["clickhouse"]["queries"]
-                        clickhouse_time_ms = db_metrics["clickhouse"]["time_ms"]
-                        clickhouse_slow_queries = db_metrics["clickhouse"]["slow_queries"]
-
-                    if "redis" in db_metrics:
-                        redis_operations = db_metrics["redis"]["operations"] 
-                        redis_time_ms = db_metrics["redis"]["time_ms"]
-                        redis_slow_operations = db_metrics["redis"]["slow_operations"]
-
-                # Create custom metrics to store API-specific data
-                custom_metrics = {
-                    "api": {
-                        "path": path,
-                        "method": method,
-                        "status_code": status_code,
-                        "response_size": response_size or 0
-                    }
-                }
-
-                # Prepare error message if there was an error
-                error_message = None
-                if error_info and "message" in error_info:
-                    error_message = error_info["message"]
-
-                # Create event metrics object
-                event_metrics = EventMetricsCreate(
-                    event_id=event_id,
-                    correlation_id=correlation_id,
-                    tenant=tenant,
-                    source_type="api",
-                    consumer_name="api_endpoint",
-                    module_name="fastapi",
-                    timestamp=datetime.utcnow(),
-                    started_at=datetime.fromtimestamp(start_time),
-                    completed_at=datetime.fromtimestamp(end_time),
-                    duration_ms=process_time_ms,
-                    success=(status_code < 500),
-                    error_message=error_message,
-                    mongodb_queries=mongodb_queries,
-                    mongodb_time_ms=mongodb_time_ms,
-                    mongodb_slow_queries=mongodb_slow_queries,
-                    clickhouse_queries=clickhouse_queries,
-                    clickhouse_time_ms=clickhouse_time_ms,
-                    clickhouse_slow_queries=clickhouse_slow_queries,
-                    redis_operations=redis_operations,
-                    redis_time_ms=redis_time_ms,
-                    redis_slow_operations=redis_slow_operations,
-                    custom_metrics=json.dumps(custom_metrics)
-                )
-
-                # Save metrics using the CRUD class
-                asyncio.create_task(crud_event_metrics.create_metrics(event_metrics))
-
-            except Exception as e:
-                logger.error(f"Error saving API metrics: {e}", exc_info=True)
-
-            # 3. Publish the API request event
-            await APIRequestEvent.publish(
+            api_event = await APIRequestEvent.publish(
                 entity_id=entity_id,
                 actor_type=ActorType.USER if is_authenticated else ActorType.ANONYMOUS,
                 actor_id=user_id,
                 payload=payload,
-                correlation_id=correlation_id
+                correlation_id=correlation_id,
             )
 
-            # 4. For server errors, also publish a dedicated error event
+            timestamp = api_event.timestamp.timestamp()
+
+            await save_event_metrics(
+                event_id=api_event.event_id,
+                correlation_id=correlation_id,
+                source_type="api",
+                consumer_name="event_tracking",
+                module_name="events",
+                event_timestamp=timestamp,
+                started_at=timestamp - (process_time_ms / 1000),
+                completed_at=timestamp,
+                success=(status_code < 500),  # Consider 500s as failures
+                error_message=error_info.get("message") if error_info else None,
+                metrics={
+                    "path": path,
+                    "method": method,
+                    "status_code": status_code,
+                    "response_size_bytes": response_size,
+                },
+            )
+
+            # For server errors, also publish a dedicated error event
             if status_code >= 500:
-                await SystemErrorEvent.publish(
+                error_task = await SystemErrorEvent.publish(
                     entity_id="api_error",
                     actor_type=ActorType.SYSTEM,
                     actor_id="middleware",
@@ -496,7 +427,103 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                     correlation_id=correlation_id,
                 )
         except Exception as e:
-            logger.error(f"Error publishing API event: {e}", exc_info=True)
+            # Log the error but don't wait for it
+            logger.error(f"Error in _track_api_request: {e}", exc_info=True)
+
+    # async def _save_event_metrics(
+    #     self,
+    #     event_id: str,
+    #     correlation_id: str,
+    #     path: str,
+    #     method: str,
+    #     status_code: int,
+    #     process_time_ms: int,
+    #     timestamp: float,
+    #     response_size: Optional[int] = None,
+    #     error_info: Optional[dict] = None,
+    #     db_metrics: Optional[dict] = None
+    # ):
+    #     """
+    #     Save event metrics to ClickHouse.
+
+    #     This method runs asynchronously but doesn't block the main request flow.
+    #     """
+    #     try:
+    #         # Initialize db metrics
+    #         mongodb_queries = 0
+    #         mongodb_time_ms = 0
+    #         mongodb_slow_queries = 0
+
+    #         clickhouse_queries = 0
+    #         clickhouse_time_ms = 0
+    #         clickhouse_slow_queries = 0
+
+    #         redis_operations = 0
+    #         redis_time_ms = 0
+    #         redis_slow_operations = 0
+
+    #         # Extract metrics if available
+    #         if db_metrics:
+    #             if "mongodb" in db_metrics:
+    #                 mongodb = db_metrics["mongodb"]
+    #                 mongodb_queries = mongodb.get("queries", 0)
+    #                 mongodb_time_ms = mongodb.get("time_ms", 0)
+    #                 mongodb_slow_queries = mongodb.get("slow_queries", 0)
+
+    #             if "clickhouse" in db_metrics:
+    #                 clickhouse = db_metrics["clickhouse"]
+    #                 clickhouse_queries = clickhouse.get("queries", 0)
+    #                 clickhouse_time_ms = clickhouse.get("time_ms", 0)
+    #                 clickhouse_slow_queries = clickhouse.get("slow_queries", 0)
+
+    #             if "redis" in db_metrics:
+    #                 redis = db_metrics["redis"]
+    #                 redis_operations = redis.get("operations", 0)
+    #                 redis_time_ms = redis.get("time_ms", 0)
+    #                 redis_slow_operations = redis.get("slow_operations", 0)
+
+    #         # Create metrics entry for ClickHouse
+    #         metrics = EventMetricsCreate(
+    #             event_id=event_id,
+    #             correlation_id=correlation_id,
+    #             tenant=settings.APP_NAME,
+    #             source_type="api",
+    #             consumer_name="event_tracking",
+    #             module_name="events",
+    #             timestamp=datetime.utcfromtimestamp(timestamp),
+    #             started_at=datetime.utcfromtimestamp(timestamp - (process_time_ms / 1000)),
+    #             completed_at=datetime.utcfromtimestamp(timestamp),
+    #             duration_ms=process_time_ms,
+    #             success=(status_code < 500),  # Consider 500s as failures
+    #             error_message=error_info.get("message") if error_info else None,
+
+    #             # Database metrics
+    #             mongodb_queries=mongodb_queries,
+    #             mongodb_time_ms=mongodb_time_ms,
+    #             mongodb_slow_queries=mongodb_slow_queries,
+
+    #             clickhouse_queries=clickhouse_queries,
+    #             clickhouse_time_ms=clickhouse_time_ms,
+    #             clickhouse_slow_queries=clickhouse_slow_queries,
+
+    #             redis_operations=redis_operations,
+    #             redis_time_ms=redis_time_ms,
+    #             redis_slow_operations=redis_slow_operations,
+
+    #             # Add endpoint details as custom metrics
+    #             custom_metrics=json.dumps({
+    #                 "path": path,
+    #                 "method": method,
+    #                 "status_code": status_code,
+    #                 "response_size_bytes": response_size
+    #             })
+    #         )
+
+    #         await crud_event_metrics.create(metrics)
+
+    #     except Exception as e:
+    #         # Log error but don't propagate - metrics storage shouldn't impact application
+    #         logger.error(f"Error saving event metrics: {e}", exc_info=True)
 
     async def shutdown(self):
         """Clean up resources when the application shuts down."""

@@ -21,7 +21,6 @@ class EventMessage(BaseModel):
     action: str = Field(..., description="Action performed on the entity")
     actor: Actor = Field(..., description="Actor who performed the action")
     payload: EventPayload = Field(..., description="Event payload data")
-    metrics: Optional[EventMetrics] = Field(None, description="Event performance metrics")
 
     @model_validator(mode='after')
     def ensure_payload_structure(self):

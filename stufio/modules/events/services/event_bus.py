@@ -83,8 +83,7 @@ class EventBus:
                 actor_type=event_info.actor_type,
                 actor_id=event_info.actor_id,
                 payload=event_info.payload,
-                correlation_id=event_info.correlation_id,
-                metrics=event_info.metrics,
+                correlation_id=event_info.correlation_id
             )
         except Exception as e:
             logger.exception(f"Error publishing event from info: {e}")
@@ -98,7 +97,6 @@ class EventBus:
         actor_id: Optional[str] = None,
         payload: Optional[Union[Dict[str, Any], BaseModel]] = None,
         correlation_id: Optional[str] = None,
-        metrics: Optional[Dict[str, Any]] = None,
         payload_class: Optional[Type[BaseEventPayload]] = None,  # Added parameter
         custom_headers: Optional[Dict[str, str]] = None,  # Added parameter
     ) -> BaseEventMessage:
@@ -160,7 +158,6 @@ class EventBus:
             actor_id=actor_id or "system",
             payload=validated_payload,  # Use the validated payload with correct type
             correlation_id=correlation_id,
-            metrics=metrics,
             message_class=message_class,  # Use the message class from the definition
             custom_topic=custom_topic,        # Pass custom topic
             is_high_volume=is_high_volume,     # Pass high volume flag
@@ -176,33 +173,27 @@ class EventBus:
         actor_id: str,
         payload: Optional[Dict[str, Any]] = None,
         correlation_id: Optional[str] = None,
-        metrics: Optional[Dict[str, Any]] = None,
         message_class: Type[BaseEventMessage] = BaseEventMessage,
         custom_topic: Optional[str] = None,
         is_high_volume: bool = False,
         custom_headers: Optional[Dict[str, str]] = None
     ) -> BaseEventMessage:
         """Publish an event to Kafka and store in Clickhouse.
-        
-        WARNING: This method is deprecated for direct use. Please use publish_from_definition
-        with an EventDefinition class instead for better type safety and documentation.
+        Args:
+            entity_type: Type of entity this event is about
+            entity_id: ID of the entity this event is about
+            action: Action performed on the entity
+            actor_type: Type of actor that triggered the event
+            actor_id: ID of the actor that triggered the event
+            payload: Event payload data
+            correlation_id: Correlation ID for tracking related events
+            message_class: Class of the event message
+            custom_topic: Optional custom topic name
+            is_high_volume: Flag for high volume events
+            custom_headers: Optional custom headers to include with the message
+        Returns:
+            The event message that was published
         """
-        import warnings
-        import inspect
-
-        # Skip deprecation warning if called from publish_from_definition
-        calling_frame = inspect.currentframe().f_back
-        caller_name = calling_frame.f_code.co_name if calling_frame else ""
-
-        if caller_name != "publish_from_definition":
-            warnings.warn(
-                "Direct publishing through EventBus.publish() is deprecated. " 
-                "Please use EventBus.publish_from_definition() with an EventDefinition class instead.",
-                DeprecationWarning, 
-                stacklevel=2
-            )
-
-        start_time = time.time()
 
         # Ensure Kafka client is initialized
         await self.initialize()
@@ -237,15 +228,9 @@ class EventBus:
             entity=entity_obj,
             action=action,
             actor=actor_obj,
-            payload=payload_obj,
-            metrics=metrics or {}
+            payload=payload_obj
         )
-
-        # Calculate processing time
-        processing_time = int((time.time() - start_time) * 1000)
-        if hasattr(event, 'metrics') and hasattr(event.metrics, 'processing_time_ms'):
-            event.metrics.processing_time_ms = processing_time
-
+        
         # Generate proper key for partitioning
         key_bytes = f"{entity_type}.{entity_id}".encode('utf-8') if entity_id else entity_type.encode('utf-8')
 
@@ -273,107 +258,56 @@ class EventBus:
             logger.error(f"Error publishing event to Kafka: {e}", exc_info=True)
 
         # Process in-memory handlers
-        try:
-            await self._process_memory_handlers(event)
-        except Exception as e:
-            logger.error(f"Error processing in-memory handlers: {e}", exc_info=True)
+        # try:
+        #     await self._process_memory_handlers(event)
+        # except Exception as e:
+        #     logger.error(f"Error processing in-memory handlers: {e}", exc_info=True)
 
-        # Process HTTP subscribers asynchronously
-        asyncio.create_task(self._process_http_subscribers(event))
+        # # Process HTTP subscribers asynchronously
+        # asyncio.create_task(self._process_http_subscribers(event))
 
         return event
 
-    async def _ensure_event_registered(self, event_def: Dict[str, Any]) -> None:
-        """Ensure event definition is registered in MongoDB."""
-        try:
-            # Get the event registry
-            await self.registry.register_event(event_def)
-        except Exception as e:
-            logger.error(f"Error registering event definition: {e}", exc_info=True)
+    # async def _process_memory_handlers(self, event: EventMessage) -> None:
+    #     """Process all in-memory handlers for this event."""
+    #     handlers = self.registry.get_memory_handlers(event.entity.type, event.action)
 
-    async def _process_memory_handlers(self, event: EventMessage) -> None:
-        """Process all in-memory handlers for this event."""
-        handlers = self.registry.get_memory_handlers(event.entity.type, event.action)
+    #     for handler in handlers:
+    #         try:
+    #             if asyncio.iscoroutinefunction(handler):
+    #                 await handler(event)
+    #             else:
+    #                 handler(event)
+    #         except Exception as e:
+    #             logger.error(f"Error in event handler: {e}", exc_info=True)
 
-        for handler in handlers:
-            try:
-                if asyncio.iscoroutinefunction(handler):
-                    await handler(event)
-                else:
-                    handler(event)
-            except Exception as e:
-                logger.error(f"Error in event handler: {e}", exc_info=True)
-
-    async def _process_http_subscribers(self, event: EventMessage) -> None:
-        """Process all HTTP subscribers for this event."""
-        try:
-            # Get subscribers from the registry
-            subscribers = await self.registry.get_matching_subscriptions(
-                event.entity.type, event.action
-            )
-
-            # Send event to each subscriber
-            for subscriber in subscribers:
-                try:
-                    resp = await self.http_client.post(
-                        subscriber.callback_url,
-                        json=event.model_dump(),
-                        headers={"Content-Type": "application/json"}
-                    )
-                    resp.raise_for_status()
-                except Exception as e:
-                    logger.error(
-                        f"❌ Failed to deliver event to {subscriber.callback_url}: {e}"
-                    )
-        except Exception as e:
-            logger.error(f"Error processing HTTP subscribers: {e}", exc_info=True)
-
-    def subscribe(self, entity_type: str, action: str, handler: Callable) -> None:
-        """Subscribe to events with an in-memory handler function."""
-        self.registry.subscribe(entity_type, action, handler)
-
-    # async def replay_events(self, entity_type: Optional[str] = None,
-    #                       action: Optional[str] = None, limit: int = 100) -> List[EventMessage]:
-    #     """Replay events from Clickhouse for testing or recovery."""
+    # async def _process_http_subscribers(self, event: EventMessage) -> None:
+    #     """Process all HTTP subscribers for this event."""
     #     try:
-    #         clickhouse_db = await ClickhouseDatabase()
-
-    #         # Build query filters
-    #         filters = {}
-    #         if entity_type:
-    #             filters["entity_type"] = entity_type
-
-    #         if action:
-    #             filters["action"] = action
-
-    #         # Get events from Clickhouse
-    #         event_logs = await crud_event_log.get_multi(
-    #             filters=filters,
-    #             sort="timestamp DESC",
-    #             limit=limit
+    #         # Get subscribers from the registry
+    #         subscribers = await self.registry.get_matching_subscriptions(
+    #             event.entity.type, event.action
     #         )
 
-    #         result = []
-    #         for event_log in event_logs:
-    #             event = EventMessage(
-    #                 event_id=event_log.event_id,
-    #                 correlation_id=event_log.correlation_id,
-    #                 timestamp=event_log.timestamp,
-    #                 entity=Entity(type=event_log.entity_type, id=event_log.entity_id),
-    #                 action=event_log.action,
-    #                 actor=Actor(type=event_log.actor_type, id=event_log.actor_id),
-    #                 payload=EventPayload(**(event_log.payload or {})),
-    #                 metrics=EventMetrics(**(event_log.metrics or {}))
-    #             )
-    #             result.append(event)
-
-    #             # Process event handlers
-    #             await self._process_memory_handlers(event)
-
-    #         return result
+    #         # Send event to each subscriber
+    #         for subscriber in subscribers:
+    #             try:
+    #                 resp = await self.http_client.post(
+    #                     subscriber.callback_url,
+    #                     json=event.model_dump(),
+    #                     headers={"Content-Type": "application/json"}
+    #                 )
+    #                 resp.raise_for_status()
+    #             except Exception as e:
+    #                 logger.error(
+    #                     f"❌ Failed to deliver event to {subscriber.callback_url}: {e}"
+    #                 )
     #     except Exception as e:
-    #         logger.error(f"Error replaying events: {e}", exc_info=True)
-    #         return []
+    #         logger.error(f"Error processing HTTP subscribers: {e}", exc_info=True)
+
+    # def subscribe(self, entity_type: str, action: str, handler: Callable) -> None:
+    #     """Subscribe to events with an in-memory handler function."""
+    #     self.registry.subscribe(entity_type, action, handler)
 
 # Create global instance
 event_bus = EventBus()

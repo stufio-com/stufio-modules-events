@@ -5,6 +5,7 @@ from contextlib import AsyncExitStack
 # Import the classes we need to patch
 from faststream.broker.subscriber.usecase import SubscriberUsecase
 from faststream.utils.context.repository import context
+from stufio.modules.events import HandlerResponse
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +28,17 @@ async def improved_process_message(self, msg: Any) -> Any:
     parsing_errors = []
     results = []
     suitable_handlers_found = False
-    
+
     async with AsyncExitStack() as stack:
         # Setup common context
         stack.enter_context(self.lock)
-        
+
         # Add extra context
         for k, v in self.extra_context.items():
             stack.enter_context(context.scope(k, v))
-            
+
         stack.enter_context(context.scope("handler_", self))
-        
+
         # Setup middlewares once
         middlewares = []
         for base_m in self._broker_middlewares:
@@ -45,7 +46,7 @@ async def improved_process_message(self, msg: Any) -> Any:
             middlewares.append(middleware)
             await middleware.__aenter__()
             stack.push_async_exit(middleware.__aexit__)
-        
+
         # Add this right after setting up the context for message:
         try:
             # Apply correlation ID middleware first
@@ -53,83 +54,48 @@ async def improved_process_message(self, msg: Any) -> Any:
             await correlation_id_middleware(msg)
         except Exception as e:
             logger.warning(f"Error applying correlation_id_middleware: {e}")
-        
+
         # Check all handlers
         for h in self.calls:
             try:
                 message = await h.is_suitable(msg, cache)
-                
+
                 if message is not None:
                     suitable_handlers_found = True
-                    
+
                     # Set up watcher context for this specific handler
                     watcher_context = await stack.enter_async_context(
                         self.watcher(message, **self.extra_watcher_options)
                     )
-                    
+
                     # Add message-specific context
                     with context.scope("log_context", self.get_log_context(message)), \
                          context.scope("message", message):
-                        
+
                         # Call the handler and get result
-                        # HandlerResponse is now a subclass of FastStreamResponse, 
+                        # HandlerResponse is now a subclass of FastStreamResponse,
                         # so FastStream's ensure_response will work correctly
                         result_msg = await h.call(
                             message=message,
                             _extra_middlewares=(m.consume_scope for m in middlewares[::-1])
                         )
-                        
+
                         # Set correlation ID if needed
                         if not result_msg.correlation_id:
                             result_msg.correlation_id = message.correlation_id
-                        
-                        # Handle response publishing if needed - USE SAFE APPROACH
-                        # First get publishers from handler
-                        publishers = []
-                        
-                        # Safely try to get response publishers
-                        try:
-                            # Check if get_response_publisher method exists
-                            if hasattr(self, "get_response_publisher"):
-                                # Public method version
-                                pubs = self.get_response_publisher(message)
-                                if pubs:
-                                    publishers.extend(pubs)
-                            elif hasattr(self, "_get_response_publisher"):
-                                # Private method version
-                                pubs = self._get_response_publisher(message)
-                                if pubs:
-                                    publishers.extend(pubs)
-                            elif hasattr(self, "__get_response_publisher"):
-                                # Double underscore private method
-                                pubs = self.__get_response_publisher(message)
-                                if pubs:
-                                    publishers.extend(pubs)
-                        except Exception as e:
-                            logger.debug(f"Error getting response publishers: {e}")
-                        
-                        # Add handler-specific publishers
-                        if hasattr(h, "handler") and hasattr(h.handler, "_publishers"):
-                            publishers.extend(h.handler._publishers)
-                        
-                        # Publish responses
-                        for p in publishers:
-                            try:
-                                await p.publish(
-                                    result_msg.body,
-                                    **result_msg.as_publish_kwargs(),
-                                    _extra_middlewares=[m.publish_scope for m in middlewares[::-1]]
-                                )
-                            except Exception as e:
-                                logger.warning(f"Error publishing response: {e}")
-                        
+
+                        if isinstance(result_msg, HandlerResponse):
+                            result_msg.after_consume(
+                                msg, getattr(h, "call_name", "unknown")
+                            )
+
                         # Collect result
                         results.append(result_msg)
-                        
+
             except Exception as e:
                 parsing_errors.append(e)
                 logger.warning(f"Error in handler {getattr(h, 'call_name', 'unknown')}: {e}")
-        
+
         # Handle the case where no suitable handlers were found
         if not suitable_handlers_found:
             # Extract headers for better logging
@@ -141,20 +107,21 @@ async def improved_process_message(self, msg: Any) -> Any:
                               for k, v in (msg.raw_message.headers or [])}
             except Exception:
                 pass
-            
+
             # Log instead of raising exception
             logger.info(f"No matching handler for message. Headers: {headers}")
-            
+
             # If there were parsing errors, log them at debug level
             if parsing_errors:
                 logger.debug(f"Parsing errors encountered: {parsing_errors}")
-        
+
     # Return results: either list of results or None
     if results:
         if len(results) == 1:
             return results[0]  # For backward compatibility
+
         return results
-    
+
     # Use standard ensure_response for empty responses
     from faststream.broker.response import ensure_response
     return ensure_response(None)  # Return empty response

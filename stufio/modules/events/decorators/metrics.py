@@ -16,9 +16,8 @@ from stufio.core.config import get_settings
 from ..crud import crud_event_metrics
 from ..schemas.event_metrics import EventMetricsCreate
 
-# Import new metrics system
-from ..metrics.registry import get_all_metrics, reset_all_metrics
-
+# Import unified metrics system from framework
+from stufio.db.metrics import get_all_metrics, reset_all_metrics
 
 settings = get_settings()
 
@@ -161,6 +160,7 @@ def extract_metrics_from_result(result: Any) -> Dict[str, Any]:
     
     # No metrics found
     return {}
+
 
 def _extract_event(*args, **kwargs) -> Optional[BaseEventMessage]:
     """Extract event from args or kwargs."""

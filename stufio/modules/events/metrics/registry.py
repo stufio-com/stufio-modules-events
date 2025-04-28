@@ -1,39 +1,39 @@
 """
 Registry for metrics providers.
 
-This module provides the core registry for metrics providers that allows
-modules to register their own metrics providers without modifying the
-events module code.
+This module manages the registration and retrieval of metrics providers,
+which collect performance metrics from various systems.
 """
 
+import importlib
 import logging
-import inspect
+import pkgutil
 import sys
-from typing import Dict, Any, Type, Optional, List
+from typing import Any, Dict, List, Optional, Set, Type
 
+from stufio.core.config import get_settings
 from .providers import BaseMetricsProvider
 
+# Import unified metrics system from framework
+from stufio.db.metrics import reset_all_metrics as framework_reset_all_metrics
+from stufio.db.metrics import get_all_metrics as framework_get_all_metrics
+
+settings = get_settings()
 logger = logging.getLogger(__name__)
 
+# Registry for additional metrics providers beyond the core DB providers
 class MetricsProviderRegistry:
     """Registry for metrics providers.
     
-    This singleton class manages all registered metrics providers and allows
-    collecting metrics from them in a standardized way.
+    This registry handles the discovery, registration, and management of custom 
+    metrics providers beyond the core database providers.
     """
     
-    # Singleton instance
     _instance = None
-    
-    # Dictionary of registered provider classes
-    _provider_classes: Dict[str, Type[BaseMetricsProvider]] = {}
-    
-    # Dictionary of instantiated provider objects
-    _providers: Dict[str, BaseMetricsProvider] = {}
-    
-    # Flag to track if discovery has run
+    _provider_classes = {}
+    _providers = {}
     _discovery_complete = False
-
+    
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(MetricsProviderRegistry, cls).__new__(cls)
@@ -42,227 +42,168 @@ class MetricsProviderRegistry:
             cls._instance._providers = {}
             cls._instance._discovery_complete = False
         return cls._instance
-    
+
     def register_provider(self, provider_class: Type[BaseMetricsProvider]) -> None:
         """Register a metrics provider class.
         
         Args:
-            provider_class: The provider class to register
+            provider_class: The provider class to register. Must have a provider_name attribute.
         
         Raises:
-            ValueError: If the provider doesn't have a valid provider_name or is already registered
+            ValueError: If the provider doesn't have a name.
         """
-        if not provider_class.provider_name:
-            raise ValueError(
-                f"Provider class {provider_class.__name__} must have a provider_name class attribute"
-            )
-        
-        provider_name = provider_class.provider_name
-        
-        if provider_name in self._provider_classes:
-            # Skip if already registered with the same class
-            if self._provider_classes[provider_name] == provider_class:
-                return
+        provider_name = getattr(provider_class, "provider_name", None)
+        if not provider_name:
+            raise ValueError(f"Metrics provider {provider_class.__name__} has no provider_name attribute")
             
-            logger.warning(
-                f"Provider '{provider_name}' is already registered with {self._provider_classes[provider_name].__name__}. "
-                f"Overriding with {provider_class.__name__}"
-            )
-        
         self._provider_classes[provider_name] = provider_class
         logger.info(f"Registered metrics provider: {provider_name}")
         
         # If we already have an instance, replace it
         if provider_name in self._providers:
             del self._providers[provider_name]
-    
-    def get_provider(self, provider_name: str, **config) -> Optional[BaseMetricsProvider]:
-        """Get or create a provider instance by name.
+        
+    def get_provider(self, name: str) -> Optional[BaseMetricsProvider]:
+        """Get a metrics provider by name.
         
         Args:
-            provider_name: Name of the provider to get
-            config: Optional configuration for the provider if it needs to be created
+            name: Provider name to retrieve
             
         Returns:
-            The provider instance, or None if no such provider exists
+            The provider instance, or None if not found
         """
-        # Return existing instance if we have it
-        if provider_name in self._providers:
-            return self._providers[provider_name]
+        # Ensure all providers are discovered
+        if not self._discovery_complete:
+            self.discover_providers()
         
-        # Create new instance if we have the class
-        if provider_name in self._provider_classes:
-            provider_class = self._provider_classes[provider_name]
+        # If we already have an instance, return it
+        if name in self._providers:
+            return self._providers[name]
+            
+        # If the class is registered, create an instance
+        if name in self._provider_classes:
             try:
-                provider = provider_class(**config)
-                self._providers[provider_name] = provider
+                provider = self._provider_classes[name]()
+                self._providers[name] = provider
                 return provider
             except Exception as e:
-                logger.error(f"Error instantiating provider {provider_name}: {e}")
-                return None
+                logger.error(f"Error instantiating metrics provider {name}: {e}")
         
         return None
-    
-    def get_all_providers(self) -> Dict[str, BaseMetricsProvider]:
-        """Get all registered provider instances.
         
+    async def get_metrics_from_provider(self, name: str) -> Dict[str, Any]:
+        """Get metrics from a specific provider.
+        
+        Args:
+            name: Provider name to get metrics from
+            
         Returns:
-            Dictionary mapping provider names to provider instances
+            Dict with metrics, or empty dict if provider not found
         """
-        # Ensure discovery has run if it hasn't already
+        provider = self.get_provider(name)
+        if provider is None:
+            return {}
+        
+        try:
+            return await provider.get_metrics()
+        except Exception as e:
+            logger.error(f"Error getting metrics from provider {name}: {e}")
+            return {"error": str(e)}
+        
+    async def reset_provider_metrics(self, name: str) -> None:
+        """Reset metrics for a specific provider.
+        
+        Args:
+            name: Provider name to reset metrics for
+        """
+        provider = self.get_provider(name)
+        if provider is None:
+            return
+        
+        try:
+            await provider.reset_metrics()
+        except Exception as e:
+            logger.error(f"Error resetting metrics for provider {name}: {e}")
+        
+    async def reset_custom_providers_metrics(self) -> None:
+        """Reset metrics for all custom providers."""
+        # Ensure all providers are discovered
         if not self._discovery_complete:
             self.discover_providers()
             
-        # Create instances for any registered classes that don't have instances yet
-        for name, cls in self._provider_classes.items():
-            if name not in self._providers:
-                try:
-                    self._providers[name] = cls()
-                except Exception as e:
-                    logger.error(f"Error instantiating provider {name}: {e}")
-        
-        return self._providers
-    
-    async def collect_all_metrics(self) -> Dict[str, Dict[str, Any]]:
-        """Collect metrics from all registered providers.
-        
-        Returns:
-            Dictionary mapping provider names to their metrics
-        """
-        providers = self.get_all_providers()
-        results = {}
-        
-        for name, provider in providers.items():
-            try:
-                results[name] = await provider.get_metrics()
-            except Exception as e:
-                logger.error(f"Error collecting metrics from provider {name}: {e}")
-                results[name] = {"error": str(e)}
-        
-        return results
-    
-    async def reset_all_metrics(self) -> None:
-        """Reset metrics for all providers."""
-        providers = self.get_all_providers()
-        
-        for name, provider in providers.items():
-            try:
-                await provider.reset_metrics()
-            except Exception as e:
-                logger.error(f"Error resetting metrics for provider {name}: {e}")
-    
+        # Reset metrics for all registered providers
+        for name in self._provider_classes:
+            await self.reset_provider_metrics(name)
+            
     def discover_providers(self) -> None:
+        """Discover metrics providers in relevant modules.
+        
+        Searches for providers in:
+        1. stufio.modules.events.metrics
+        2. stufio.modules.* (other module metrics)
+        3. Application modules
         """
-        Discover metrics providers from all installed modules.
+        discovered = 0
         
-        This method searches for BaseMetricsProvider subclasses in:
-        1. All installed stufio modules that match metrics/db patterns
-        2. All application modules registered in the stufio module registry
-        """
-        if self._discovery_complete:
-            return
-            
-        logger.info("Discovering metrics providers...")
+        # Look in current module first
+        discovered += self._scan_module_for_providers("stufio.modules.events.metrics")
         
-        # Track number of providers found
-        providers_found = 0
-        
-        # 1. First method: Check specific stufio packages that likely contain metrics providers
-        relevant_packages = set()
-        
-        # Add stufio modules focused on db and metrics
-        for name, module in list(sys.modules.items()):
-            if name.startswith('stufio.') and ('metrics' in name or 'db' in name):
-                relevant_packages.add(name)
-        
-        # Check these specific modules for metrics providers
-        for name in relevant_packages:
-            providers_found += self._scan_module_for_providers(name)
-            
-        # 2. Second method: Check all modules in the stufio module registry
+        # Check modules namespace
         try:
-            # Use core module registry to discover providers in application modules
-            from stufio.core.module_registry import registry
-            
-            # Go through all registered modules
-            for module_name, module in registry.modules.items():
-                try:
-                    # Look for metrics submodule
-                    metrics_module = module.get_submodule('metrics')
-                    if metrics_module:
-                        module_path = f"{module.__module__}.metrics"
-                        providers_found += self._scan_module_for_providers(module_path)
-                    
-                    # Also check if the module has metrics providers in its main package
-                    module_path = module.__module__
-                    if module_path in sys.modules:
-                        providers_found += self._scan_module_for_providers(module_path)
-                        
-                    # Check if module.py contains metrics providers (common pattern)
-                    module_impl = module.get_submodule('module')
-                    if module_impl:
-                        module_path = f"{module.__module__}.module"
-                        providers_found += self._scan_module_for_providers(module_path)
-                    
-                except Exception as e:
-                    logger.debug(f"Error scanning module {module_name} for metrics providers: {e}")
-        except ImportError:
-            logger.debug("Core module registry not available, skipping module discovery")
-        except Exception as e:
-            logger.error(f"Error during module registry scan: {e}")
-
-        # 3. Import built-in providers to ensure they're registered
-        try:
-            # Import our built-in providers
-            from ..metrics import db_providers
-            providers_found += 1
-        except ImportError:
+            import stufio.modules
+            for _, module_name, is_pkg in pkgutil.iter_modules(stufio.modules.__path__, "stufio.modules."):
+                if is_pkg and module_name != "stufio.modules.events":
+                    # Look for metrics module
+                    metrics_module = f"{module_name}.metrics"
+                    try:
+                        discovered += self._scan_module_for_providers(metrics_module)
+                    except ImportError:
+                        # No metrics module in this package
+                        pass
+        except (ImportError, AttributeError):
             pass
             
-        logger.info(f"Discovered {providers_found} metrics providers")
+        # TODO: Add support for application module discovery
+                
+        logger.debug(f"Discovered {discovered} metrics providers")
         self._discovery_complete = True
-    
+            
     def _scan_module_for_providers(self, module_name: str) -> int:
-        """
-        Scan a module for metrics providers.
+        """Scan a module for metrics providers.
         
         Args:
-            module_name: Name of the module to scan
+            module_name: Full module name to scan
             
         Returns:
             Number of providers found
         """
-        providers_found = 0
+        discovered = 0
         try:
-            module = sys.modules.get(module_name)
-            if not module:
-                return 0
-                
-            # Look for BaseMetricsProvider subclasses
-            for attr_name in dir(module):
-                try:
-                    attr = getattr(module, attr_name)
-                    if (inspect.isclass(attr) and 
-                        issubclass(attr, BaseMetricsProvider) and 
-                        attr is not BaseMetricsProvider and
-                        attr.provider_name):
-                        
-                        # Register the provider
-                        self.register_provider(attr)
-                        providers_found += 1
-                except (AttributeError, TypeError):
-                    pass
-        except Exception as e:
-            logger.debug(f"Error scanning module {module_name}: {e}")
+            module = importlib.import_module(module_name)
+            for name in dir(module):
+                obj = getattr(module, name)
+                if (isinstance(obj, type) and 
+                    issubclass(obj, BaseMetricsProvider) and 
+                    obj is not BaseMetricsProvider and
+                    hasattr(obj, "provider_name")):
+                    
+                    provider_name = getattr(obj, "provider_name", None)
+                    if provider_name and provider_name not in self._provider_classes:
+                        self._provider_classes[provider_name] = obj
+                        discovered += 1
+                    
+        except ImportError:
+            pass
+            
+        return discovered
         
-        return providers_found
 
-
-# Singleton instance for global access
+# Global registry instance
 _registry = MetricsProviderRegistry()
 
+
 def register_metrics_provider(provider_class: Type[BaseMetricsProvider]) -> Type[BaseMetricsProvider]:
-    """Decorator to register a metrics provider class.
+    """Decorator to register a metrics provider.
     
     Example:
         ```python
@@ -274,51 +215,46 @@ def register_metrics_provider(provider_class: Type[BaseMetricsProvider]) -> Type
                 # Implementation
                 return {"queries": 10}
         ```
-    
-    Args:
-        provider_class: The provider class to register
-        
-    Returns:
-        The provider class (unchanged)
     """
     _registry.register_provider(provider_class)
     return provider_class
 
 
 async def get_all_metrics() -> Dict[str, Dict[str, Any]]:
-    """Collect all metrics from registered providers.
+    """Get metrics from all registered providers.
     
     Returns:
-        Dictionary mapping provider names to their metrics
+        Dict mapping provider names to their metrics
     """
-    return await _registry.collect_all_metrics()
+    # Get framework metrics (DB providers)
+    metrics = await framework_get_all_metrics()
+    
+    # Add custom metrics from registry
+    # Ensure providers are discovered
+    if not _registry._discovery_complete:
+        _registry.discover_providers()
+        
+    # Get metrics from all custom providers
+    for name, provider_class in _registry._provider_classes.items():
+        if name not in metrics:  # Don't override core providers
+            try:
+                provider = _registry.get_provider(name)
+                if provider:
+                    metrics[name] = await provider.get_metrics()
+            except Exception as e:
+                logger.error(f"Error getting metrics from provider {name}: {e}")
+                metrics[name] = {"error": str(e)}
+                
+    return metrics
 
 
 async def reset_all_metrics() -> None:
-    """Reset metrics for all registered providers."""
-    await _registry.reset_all_metrics()
-
-
-def discover_metrics_providers() -> List[Type[BaseMetricsProvider]]:
-    """
-    Discover and register all metrics providers.
+    """Reset all metrics providers (DB and custom)."""
+    # Reset framework metrics (DB providers)
+    await framework_reset_all_metrics()
     
-    Returns:
-        List of discovered provider classes
-    """
-    _registry.discover_providers()
-    return list(_registry._provider_classes.values())
+    # Reset custom metrics
+    await _registry.reset_custom_providers_metrics()
 
 
-# Get a specific provider instance by name
-def get_metrics_provider(name: str, **config) -> Optional[BaseMetricsProvider]:
-    """Get a metrics provider instance by name.
-    
-    Args:
-        name: The name of the provider to get
-        config: Optional configuration for the provider
-        
-    Returns:
-        The provider instance, or None if no such provider exists
-    """
-    return _registry.get_provider(name, **config)
+__all__ = ["register_metrics_provider", "get_all_metrics", "reset_all_metrics", "MetricsProviderRegistry"]

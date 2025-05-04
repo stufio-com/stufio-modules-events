@@ -47,7 +47,7 @@ class EventLogCreate(BaseModel):
     actor_id: str
     # Explicitly define as strings
     payload: Optional[str] = None  # JSON string
-    metrics: Optional[str] = None  # JSON string
+    # metrics: Optional[str] = None - moved to separate table
 
 class EventLogUpdate(EventLogCreate):
     pass
@@ -74,7 +74,7 @@ class EventLogResponse(BaseModel):
     actor_type: str
     actor_id: str
     payload: Optional[Dict[str, Any]] = None
-    metrics: Optional[Dict[str, Any]] = None
+    # metrics: Optional[Dict[str, Any]] = None # moved to separate table
     processed: bool
     processing_attempts: int
     error_message: Optional[str] = None
@@ -90,7 +90,6 @@ class EventDefinitionBase(BaseModel):
     require_actor: bool = False
     require_entity: bool = True
     require_payload: bool = False
-    require_metrics: bool = False
     descr: Optional[str] = None
     payload_schema: Optional[Dict[str, Any]] = None
     payload_example: Optional[Dict[str, Any]] = None
@@ -115,7 +114,6 @@ class EventDefinitionResponse(EventDefinitionBase):
     require_actor: bool = False
     require_entity: bool = True
     require_payload: bool = False
-    require_metrics: bool = False
     descr: Optional[str] = None
     payload_schema: Optional[Dict[str, Any]] = None
     payload_example: Optional[Dict[str, Any]] = None

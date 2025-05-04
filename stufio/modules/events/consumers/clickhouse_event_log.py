@@ -94,9 +94,20 @@ async def log_event_to_clickhouse(msg: KafkaMessage, logger: Logger) -> None:
                 kafka_broker.logger.warning("Received empty message body")
                 return None
 
+        # Log body type and structure for debugging
+        kafka_broker.logger.info(f"Body type: {type(body)}, Body keys: {list(body.keys()) if isinstance(body, dict) else 'Not a dict'}")
+        if isinstance(body, dict) and 'event_id' in body:
+            kafka_broker.logger.info(f"Event ID in body: {body['event_id']}")
+        
         # 5. Convert to BaseEventMessage and extract further metadata
-        event = BaseEventMessage.model_validate(body)
-        kafka_broker.logger.info(f"Parsed event {event_name} with ID {event.event_id}")
+        try:
+            event = BaseEventMessage.model_validate(body)
+            kafka_broker.logger.info(f"Parsed event {event_name} with ID {event.event_id}")
+        except Exception as e:
+            kafka_broker.logger.error(f"Failed to validate message as BaseEventMessage: {e}")
+            # Log the body structure for debugging
+            kafka_broker.logger.error(f"Message body structure: {json.dumps(body, default=str)[:500]}...")
+            raise
 
         # 6. Extract entity_type/action from event if still unknown
         if entity_type == "unknown" and event.entity and hasattr(event.entity, 'type'):

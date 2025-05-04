@@ -16,6 +16,35 @@ from .helpers import register_module_events
 logger = logging.getLogger(__name__)
 
 
+class MetricsProviderMixin:
+    """Mixin for modules that use the metrics provider system."""
+
+    def register(self: "ModuleInterface", app: StufioAPI) -> None:
+        """Register this module with metrics provider system."""
+        # First call the parent class's register method
+        super().register(app)
+
+        self.register_metrics_providers(app)
+
+    def register_metrics_providers(self: "ModuleInterface", app: StufioAPI) -> None:
+        """Register metrics providers for this module."""
+        try:
+            # Initialize the metrics provider registry
+            from .metrics.registry import MetricsProviderRegistry
+
+            metrics_registry = MetricsProviderRegistry()
+
+            # Discover all available metrics providers
+            metrics_registry.discover_providers()
+
+            logger.info(f"Registered metrics providers for {self.name} module")
+        except Exception as e:
+            logger.error(
+                f"Error registering metrics providers for module {self.name}: {str(e)}",
+                exc_info=True,
+            )
+
+
 class KafkaModuleMixin:
     """Mixin for modules that need Kafka support."""
 
@@ -163,10 +192,10 @@ class EventsModuleMixin:
                     logger.error(f"Module path not available for {self.name}")
                     return
                 module = importlib.import_module(self.module_path)
-                
+
             # Clear existing events before registering new ones
             self._events = []
-                
+
             # Look for EventDefinition classes
             for name, cls in inspect.getmembers(module):
                 if inspect.isclass(cls) and issubclass(cls, EventDefinition) and cls != EventDefinition:
@@ -186,7 +215,9 @@ class EventsModuleMixin:
             )
 
 
-class EventsModule(KafkaModuleMixin, EventsModuleMixin, ModuleInterface):
+class EventsModule(
+    MetricsProviderMixin, KafkaModuleMixin, EventsModuleMixin, ModuleInterface
+):
     """Events module for event-driven architecture support."""
 
     version = __version__

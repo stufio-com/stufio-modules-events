@@ -25,12 +25,7 @@ class EventLogModel(ClickhouseBase):
     actor_type: str
     actor_id: str
     payload: Optional[str] = None  # JSON string
-    metrics: Optional[str] = None  # JSON string
-    processed: bool = False
-    processing_attempts: int = 0
-    error_message: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime_now_sec)
-    updated_at: datetime = Field(default_factory=datetime_now_sec)
 
     model_config = {"table_name": "event_logs", "from_attributes": True}
 

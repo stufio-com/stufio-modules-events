@@ -366,20 +366,6 @@ class EventTrackingMiddleware(BaseStufioMiddleware):
                 is_authenticated=is_authenticated,
             )
 
-            # # Create async tasks for both operations to run in parallel
-            # await self._save_event_metrics(
-            #     event_id=event_id,
-            #     correlation_id=correlation_id,
-            #     path=path,
-            #     method=method,
-            #     status_code=status_code,
-            #     process_time_ms=process_time_ms,
-            #     timestamp=timestamp,
-            #     response_size=response_size,
-            #     error_info=error_info,
-            #     db_metrics=db_metrics,
-            # )
-
             api_event = await APIRequestEvent.publish(
                 entity_id=entity_id,
                 actor_type=ActorType.USER if is_authenticated else ActorType.ANONYMOUS,

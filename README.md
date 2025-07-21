@@ -88,21 +88,6 @@ async def create_order(user_id, order_data):
     )
 ```
 
-## Subscribing to Events
-
-```python
-from stufio.modules.events.helpers import subscribe_to_event
-
-def setup_event_handlers():
-    subscribe_to_event("order", "created", handle_order_created)
-    
-async def handle_order_created(event):
-    # Process the event
-    order_id = event.entity.id
-    order_data = event.payload.after
-    # ... handle the event
-```
-
 ## Advanced Features
 
 - Event replay for testing and recovery

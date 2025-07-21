@@ -27,13 +27,28 @@ class RemoveProcessingFieldsFromEventLog(ClickhouseMigrationScript):
         )
         
         # Convert result to something we can check
-        table_exists = False
-        if isinstance(result, int) and result > 0:
-            table_exists = True
+        try:
+            count = int(self._safe_get_query_value(result, 0))
+            table_exists = count > 0
+        except (ValueError, TypeError):
+            table_exists = False
         
         if not table_exists:
             # Log that the table doesn't exist, but don't fail the migration
             logger.info(f"Table {db_name}.event_logs does not exist, skipping column removal")
+            return
+        
+        # Check that required columns exist to avoid errors
+        required_columns = ['timestamp', 'entity_type', 'action']
+        missing_columns = []
+        
+        for column in required_columns:
+            if not await self._column_exists(db, db_name, 'event_logs', column):
+                missing_columns.append(column)
+        
+        if missing_columns:
+            logger.warning(f"Required columns are missing from {db_name}.event_logs: {', '.join(missing_columns)}")
+            logger.warning("Cannot proceed with migration. Please check the schema of the event_logs table.")
             return
             
         # Check for dependent views
@@ -47,21 +62,23 @@ class RemoveProcessingFieldsFromEventLog(ClickhouseMigrationScript):
                 """
             )
             
-            if result:
+            # Handle different possible result types
+            if isinstance(result, list):
                 for row in result:
-                    view_name = row[0]
-                    # Check if view depends on event_logs table
-                    dep_result = await db.command(
-                        f"""
-                        SELECT count() FROM system.tables 
-                        WHERE database = '{db_name}' 
-                          AND name = '{view_name}' 
-                          AND has(CAST(dependencies AS Array(String)), 'event_logs');
-                        """
-                    )
-                    
-                    if isinstance(dep_result, int) and dep_result > 0:
-                        dependent_views.append(view_name)
+                    if isinstance(row, (list, tuple)) and len(row) > 0:
+                        view_name = row[0]
+                        # Check if view depends on event_logs table
+                        dep_result = await db.command(
+                            f"""
+                            SELECT count() FROM system.tables 
+                            WHERE database = '{db_name}' 
+                              AND name = '{view_name}' 
+                              AND has(CAST(dependencies AS Array(String)), 'event_logs');
+                            """
+                        )
+                        
+                        if isinstance(dep_result, int) and dep_result > 0:
+                            dependent_views.append(view_name)
         except Exception as e:
             logger.warning(f"Error checking for dependent views: {e}")
             # Assume event_logs_daily might be dependent
@@ -109,23 +126,49 @@ class RemoveProcessingFieldsFromEventLog(ClickhouseMigrationScript):
         # Recreate the materialized views if needed
         if 'event_logs_daily' in dependent_views:
             logger.info("Recreating event_logs_daily materialized view without processing fields")
-            await db.command(
-                f"""
-                CREATE MATERIALIZED VIEW IF NOT EXISTS `{db_name}`.`event_logs_daily`
-                ENGINE = SummingMergeTree()
-                PARTITION BY toDate(event_date)
-                ORDER BY (event_date, entity_type, action)
-                AS SELECT
-                    toDate(timestamp) as event_date,
-                    entity_type,
-                    action,
-                    count() as event_count,
-                    avg(JSONExtractInt(ifNull(metrics, '{{}}'), 'processing_time_ms')) as avg_processing_time_ms,
-                    max(JSONExtractInt(ifNull(metrics, '{{}}'), 'processing_time_ms')) as max_processing_time_ms
-                FROM `{db_name}`.`event_logs`
-                GROUP BY event_date, entity_type, action;
-                """
-            )
+            
+            # Check if metrics column exists
+            try:
+                metrics_column_exists = await self._column_exists(db, db_name, 'event_logs', 'metrics')
+                
+                if metrics_column_exists:
+                    logger.info("Metrics column exists, creating view with metrics fields")
+                    await db.command(
+                        f"""
+                        CREATE MATERIALIZED VIEW IF NOT EXISTS `{db_name}`.`event_logs_daily`
+                        ENGINE = SummingMergeTree()
+                        PARTITION BY toDate(event_date)
+                        ORDER BY (event_date, entity_type, action)
+                        AS SELECT
+                            toDate(timestamp) as event_date,
+                            entity_type,
+                            action,
+                            count() as event_count,
+                            avg(JSONExtractInt(ifNull(metrics, '{{}}'), 'processing_time_ms')) as avg_processing_time_ms,
+                            max(JSONExtractInt(ifNull(metrics, '{{}}'), 'processing_time_ms')) as max_processing_time_ms
+                        FROM `{db_name}`.`event_logs`
+                        GROUP BY event_date, entity_type, action;
+                        """
+                    )
+                else:
+                    logger.info("Metrics column does not exist, creating simplified view")
+                    await db.command(
+                        f"""
+                        CREATE MATERIALIZED VIEW IF NOT EXISTS `{db_name}`.`event_logs_daily`
+                        ENGINE = SummingMergeTree()
+                        PARTITION BY toDate(event_date)
+                        ORDER BY (event_date, entity_type, action)
+                        AS SELECT
+                            toDate(timestamp) as event_date,
+                            entity_type,
+                            action,
+                            count() as event_count
+                        FROM `{db_name}`.`event_logs`
+                        GROUP BY event_date, entity_type, action;
+                        """
+                    )
+            except Exception as e:
+                logger.error(f"Error recreating event_logs_daily view: {e}")
     
     async def _view_exists(self, db, db_name: str, view_name: str) -> bool:
         """Check if a materialized view exists in the database"""
@@ -152,3 +195,57 @@ class RemoveProcessingFieldsFromEventLog(ClickhouseMigrationScript):
             return isinstance(result, int) and result > 0
         except Exception:
             return False
+            
+    def _safe_get_query_value(self, result, default=None):
+        """Safely extract a value from a ClickHouse query result, which can be in different formats"""
+        if result is None:
+            return default
+            
+        # Handle scalar results
+        if isinstance(result, (int, float)):
+            return result
+            
+        if isinstance(result, str):
+            # Try to convert string to number if it looks like one
+            try:
+                if '.' in result:
+                    return float(result)
+                else:
+                    return int(result)
+            except ValueError:
+                return result
+                
+        # Handle list results with a single item
+        if isinstance(result, list) and len(result) > 0:
+            if len(result) == 1 and not isinstance(result[0], (list, tuple)):
+                item = result[0]
+            elif len(result) > 0 and isinstance(result[0], (list, tuple)) and len(result[0]) > 0:
+                item = result[0][0]
+            else:
+                return default
+                
+            # Try to convert to numeric if possible
+            if isinstance(item, str):
+                try:
+                    if '.' in item:
+                        return float(item)
+                    else:
+                        return int(item)
+                except ValueError:
+                    return item
+            return item
+                
+        # Handle dictionary results
+        if isinstance(result, dict) and result:
+            first_value = next(iter(result.values()))
+            if isinstance(first_value, str):
+                try:
+                    if '.' in first_value:
+                        return float(first_value)
+                    else:
+                        return int(first_value)
+                except ValueError:
+                    return first_value
+            return first_value
+            
+        return default

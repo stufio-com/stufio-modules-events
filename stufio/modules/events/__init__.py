@@ -7,7 +7,7 @@ from .schemas.event_definition import EventDefinition
 from .schemas.payloads import BaseEventPayload, APIRequestPayload
 from .schemas.handler import HandlerResponse, PublishEventInfo
 from .schemas.messages import BaseEventMessage
-from .helpers import publish_event, subscribe_to_event, register_module_events
+from .helpers import publish_event, register_module_events
 from .consumers import get_kafka_router, get_kafka_broker
 from .consumers.asyncapi import (
     stufio_subscriber,
@@ -18,6 +18,7 @@ from .services.event_bus import get_event_bus
 from .services.publisher_registry import register_publisher_channel
 from .middleware.base import BaseStufioMiddleware
 from .services.background_tasks import create_background_task, run_background_task
+from .utils.context import TaskContext
 
 # Import events and register them
 from .events import (
@@ -34,6 +35,7 @@ from .events import (
     SystemStartupEvent,
     SystemShutdownEvent,
     SystemErrorEvent,
+    SystemErrorPayload,
     APIRequestEvent,
 )
 
@@ -53,7 +55,6 @@ __all__ = [
     "APIRequestPayload",
     # Exported helper functions
     "publish_event",
-    "subscribe_to_event",
     "initialize_kafka_topics",
     # Background tasks
     "create_background_task",
@@ -89,5 +90,8 @@ __all__ = [
     "SystemStartupEvent",
     "SystemShutdownEvent",
     "SystemErrorEvent",
+    "SystemErrorPayload",
     "APIRequestEvent",
+    # Task context
+    "TaskContext",
 ]

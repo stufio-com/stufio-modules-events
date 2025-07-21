@@ -55,9 +55,10 @@ async def log_event_to_clickhouse(msg: KafkaMessage, logger: Logger) -> None:
         if hasattr(msg, 'raw_message') and hasattr(msg.raw_message, 'topic'):
             topic = msg.raw_message.topic
 
-        from ..helpers import extract_headers_safely
+        from ..helpers import extract_headers_safely, extract_event_metadata
+
         headers = extract_headers_safely(msg)
-        
+
         logger.warning(f"Headers: {headers}")
 
         # Try to get correlation_id from headers first
@@ -98,7 +99,7 @@ async def log_event_to_clickhouse(msg: KafkaMessage, logger: Logger) -> None:
         kafka_broker.logger.info(f"Body type: {type(body)}, Body keys: {list(body.keys()) if isinstance(body, dict) else 'Not a dict'}")
         if isinstance(body, dict) and 'event_id' in body:
             kafka_broker.logger.info(f"Event ID in body: {body['event_id']}")
-        
+
         # 5. Convert to BaseEventMessage and extract further metadata
         try:
             event = BaseEventMessage.model_validate(body)
@@ -146,35 +147,6 @@ async def log_event_to_clickhouse(msg: KafkaMessage, logger: Logger) -> None:
 
     return None
 
-# Helper functions for cleaner code
-def extract_event_metadata(msg: KafkaMessage) -> tuple[str, str]:
-    """Extract entity_type and action from message headers or topic."""
-    entity_type = "unknown"
-    action = "unknown"
-    
-    # Try headers first
-    if hasattr(msg, "raw_message") and hasattr(msg.raw_message, "headers"):
-        headers = {k.decode('utf-8') if isinstance(k, bytes) else k: 
-                  v.decode('utf-8') if isinstance(v, bytes) else v 
-                  for k, v in msg.raw_message.headers or []}
-        
-        if "entity_type" in headers:
-            entity_type = headers["entity_type"]
-        if "action" in headers:
-            action = headers["action"]
-    
-    # Fall back to topic parsing
-    if entity_type == "unknown" or action == "unknown":
-        topic = msg.raw_message.topic if hasattr(msg, 'raw_message') and hasattr(msg.raw_message, 'topic') else ""
-        topic_parts = topic.split('.')
-        if len(topic_parts) >= 3:
-            if entity_type == "unknown":
-                entity_type = topic_parts[-2]
-            if action == "unknown":
-                action = topic_parts[-1]
-    
-    return entity_type, action
-
 def serialize_field(field_data: Any) -> Optional[str]:
     """Safely serialize data to JSON string."""
     if not field_data:
@@ -216,6 +188,8 @@ async def save_error_event(msg: KafkaMessage, topic: str, exception: Exception) 
         # Extract any available information from the failed message
         body = msg._decoded_body if hasattr(msg, '_decoded_body') else msg.body
         body_str = str(body)[:1000] if body else "Empty message"
+
+        from ..helpers import extract_event_metadata
 
         # Extract entity_type and action
         entity_type, action = extract_event_metadata(msg)
@@ -326,9 +300,9 @@ async def handle_test_event(event: str, logger: Logger) -> None:
                 user_id="123.test_user_id",
                 ip_address="1.1.1.1",
                 user_agent="test.user_agent",
-                success=True  # Add required fields
-            ),
-            metrics={"test_metric": 123},
+                success=True,
+                extra={}
+            )
         )
         await UserCreatedEvent.publish(
             entity_id="test-user-id",
@@ -342,7 +316,7 @@ async def handle_test_event(event: str, logger: Logger) -> None:
                     success=True  # Add required fields
                 )
             ),
-            metrics={"test_metric": 123},
+            metrics={"test_metric": 123}
         )
         logger.info("Successfully published test login event")
     except Exception as e:

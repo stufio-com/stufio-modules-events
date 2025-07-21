@@ -106,6 +106,16 @@ class EventDefinitionMeta(type):
                     
         if "retention_days" not in cls._event_attrs:
             cls._event_attrs["retention_days"] = cls.retention_days
+            
+        # Set delays-related properties
+        if "delivery_delay_enabled" not in cls._event_attrs:
+            cls._event_attrs["delivery_delay_enabled"] = cls.delivery_delay_enabled
+            
+        if "max_delivery_delay_ms" not in cls._event_attrs:
+            cls._event_attrs["max_delivery_delay_ms"] = cls.max_delivery_delay_ms
+            
+        if "delivery_timeout_ms" not in cls._event_attrs:
+            cls._event_attrs["delivery_timeout_ms"] = cls.delivery_timeout_ms
 
         # Add to global registry if it's a concrete class
         if name != "EventDefinition" and name.endswith("Event"):
@@ -115,7 +125,44 @@ class EventDefinitionMeta(type):
 
 
 class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
-    """Base class for defining events using class attributes and generics."""
+    """Base class for defining events using class attributes and generics.
+    
+    This class provides a declarative way to define events with their associated payload types,
+    topic configurations, and delivery settings.
+    
+    Attributes:
+        name: The name of the event
+        entity_type: The type of entity this event is about
+        action: The action that occurred
+        require_actor: Whether an actor is required for this event
+        require_entity: Whether an entity is required for this event
+        require_payload: Whether a payload is required for this event
+        description: Description of the event
+        topic: Custom topic name (overrides default)
+        high_volume: Flag for high-volume events
+        partitions: Custom partition count (0 = use default)
+        retention_days: Custom retention period in days (0 = use default)
+        delivery_delay_enabled: Enable delayed message delivery for this event type
+        max_delivery_delay_ms: Maximum allowed delay in milliseconds (7 days by default)
+        delivery_timeout_ms: Timeout for message delivery in milliseconds
+    
+    Example:
+        ```python
+        class UserCreatedEvent(EventDefinition[UserCreatedPayload]):
+            entity_type = "user"
+            action = "created"
+            description = "Event triggered when a new user is created"
+        
+        # Delayed event example
+        class DelayedWebhookEvent(EventDefinition[WebhookPayload]):
+            entity_type = "webhook"
+            action = "delayed"
+            description = "Event for delayed webhook delivery"
+            delivery_delay_enabled = True
+            max_delivery_delay_ms = 86400000  # 1 day max
+            delivery_timeout_ms = 60000  # 60 seconds
+        ```
+    """
     _event_attrs: ClassVar[Dict[str, Any]] = {}
 
     # These class variables will be defined by subclasses
@@ -127,11 +174,16 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
     require_payload: ClassVar[bool] = False
     description: ClassVar[Optional[str]] = None
 
-    # New topic-related attributes
+    # Topic-related attributes
     topic: ClassVar[Optional[str]] = None  # Custom topic name (overrides default)
     high_volume: ClassVar[bool] = False    # Flag for high-volume events
     partitions: ClassVar[int] = 0          # Custom partition count (0 = use default)
     retention_days: ClassVar[int] = 0      # Custom retention period (0 = use default)
+    
+    # Delayed delivery options
+    delivery_delay_enabled: ClassVar[bool] = False  # Enable delayed message delivery
+    max_delivery_delay_ms: ClassVar[int] = 604800000  # Max delay (7 days by default)
+    delivery_timeout_ms: ClassVar[int] = 30000  # Delivery timeout (30 seconds by default)
 
     @classmethod 
     def get_topic_name(cls) -> str:
@@ -181,6 +233,7 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
         actor_id: Optional[str] = None,
         payload: Optional[Union[Dict[str, Any], BaseEventPayload, BaseModel]] = None,
         correlation_id: Optional[str] = None,
+        delay_ms: Optional[int] = None,  # New parameter for delayed delivery
     ) -> BaseEventMessage:
         """Publish an event with the current event definition."""
         # Import inside function to avoid circular imports
@@ -235,6 +288,18 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
             # Get correlation ID from TaskContext
             correlation_id = str(TaskContext.get_correlation_id())
 
+        # Check if delivery delay is supported and requested
+        if delay_ms is not None:
+            # Ensure the event type supports delays
+            delivery_delay_enabled = cls._event_attrs.get("delivery_delay_enabled", False)
+            max_delay = cls._event_attrs.get("max_delivery_delay_ms", 604800000)  # 7 days default
+            
+            if not delivery_delay_enabled:
+                logger.warning(f"Delayed delivery requested for {cls.__name__} but not enabled on this event type")
+            elif delay_ms > max_delay:
+                logger.warning(f"Requested delay {delay_ms}ms exceeds max allowed delay {max_delay}ms for {cls.__name__}")
+                delay_ms = max_delay
+
         # Publish directly with event_bus
         return await event_bus.publish_from_definition(
             event_def=cls,
@@ -242,8 +307,9 @@ class EventDefinition(Generic[P], metaclass=EventDefinitionMeta):
             actor_type=actor_type,
             actor_id=actor_id,
             payload=processed_payload,
-            correlation_id=correlation_id,  # Use correlation ID from TaskContext
-            payload_class=payload_class  
+            correlation_id=correlation_id,
+            payload_class=payload_class,
+            delay_ms=delay_ms  # Pass delay parameter to event bus
         )
 
 
@@ -316,7 +382,7 @@ class EventDefinitionValid(BaseModel):
         return v
 
     class Config:
-        extra = "allow"
+       extra = "allow"
 
 
 # List of all defined events

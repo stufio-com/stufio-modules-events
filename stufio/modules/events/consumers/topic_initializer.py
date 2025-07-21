@@ -103,6 +103,11 @@ class KafkaTopicInitializer:
                 getattr(settings, "events_KAFKA_RETENTION_BYTES", None)
             )
 
+            # Get delayed delivery settings
+            delivery_delay_enabled = event_attrs.get('delivery_delay_enabled', False)
+            max_delivery_delay_ms = event_attrs.get('max_delivery_delay_ms', 604800000)  # Default 7 days
+            delivery_timeout_ms = event_attrs.get('delivery_timeout_ms', 30000)  # Default 30 seconds
+
             # Build config dict
             config = {
                 "cleanup.policy": cleanup_policy,
@@ -122,6 +127,19 @@ class KafkaTopicInitializer:
                 config["max.compaction.lag.ms"] = str(
                     getattr(settings, "events_KAFKA_MAX_COMPACTION_LAG_MS", 9223372036854775807)
                 )
+                
+            # Add delayed delivery settings if enabled
+            if delivery_delay_enabled:
+                # These are Kafka 2.7+ settings for delayed delivery (KIP-562)
+                config["message.timestamp.type"] = "CreateTime"
+                config["delivery.timeout.ms"] = str(delivery_timeout_ms)
+                
+                # For Kafka 3.8, set the max delivery delay (introduced in later versions)
+                # This might not work in earlier Kafka versions
+                config["max.delivery.delay.ms"] = str(max_delivery_delay_ms)
+                
+                # Log the delay settings
+                logger.info(f"Configured topic {topic_name} with delayed delivery: max={max_delivery_delay_ms}ms, timeout={delivery_timeout_ms}ms")
 
             # Create topic config
             return TopicConfig(

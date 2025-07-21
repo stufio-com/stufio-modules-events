@@ -2,10 +2,6 @@ from typing import Any, Dict, Union, Optional, Type, get_type_hints, get_args, g
 import re
 import inspect
 import logging
-from faststream.asyncapi.schema import Channel, ChannelBinding, CorrelationId, Message, Operation
-from faststream.asyncapi.schema.bindings import kafka
-from faststream.asyncapi.utils import resolve_payloads
-from faststream.kafka.subscriber.asyncapi import AsyncAPIDefaultSubscriber
 from faststream.kafka.broker.registrator import KafkaRegistrator
 from faststream.broker.types import Filter, MsgType
 from faststream.broker.utils import default_filter

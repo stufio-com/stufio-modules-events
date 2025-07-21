@@ -32,6 +32,10 @@ class EventsSettings(ModuleSettings):
     KAFKA_RETENTION_MS: int = 604800000  # 7 days
     KAFKA_SEGMENT_BYTES: int = 1073741824  # 1 GB
 
+    # Kafka delayed topic settings
+    KAFKA_DELAYED_TOPIC_ENABLED: bool = True
+    KAFKA_DELAYED_TOPIC_NAME: str = "stufio.events.delayed"
+
     # Kafka consumer settings
     KAFKA_AUTO_OFFSET_RESET: str = "earliest"
     KAFKA_ENABLE_AUTO_COMMIT: bool = True

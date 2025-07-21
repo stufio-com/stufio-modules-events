@@ -1,3 +1,5 @@
+import trace
+import traceback
 from faststream.kafka.fastapi import KafkaRouter
 from stufio.core.config import get_settings
 import logging
@@ -384,7 +386,9 @@ async def correlation_id_middleware(msg):
                 else:
                     logger.debug(f"No correlation_id found in {attr_name}")
 
-        logger.warning("⚠️ No correlation_id found in any message location")
+        logger.debug("⚠️ No correlation_id found in any message location")
+        # logger.warning(f"Message headers: {headers}")
+        # logger.warning(f"Message body: {msg}")
         return False
     except Exception as e:
         logger.error(f"❌ Error in correlation_id_middleware: {e}", exc_info=True)

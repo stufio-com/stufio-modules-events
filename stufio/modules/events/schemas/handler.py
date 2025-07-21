@@ -49,6 +49,9 @@ class PublishEventInfo(BaseModel):
     correlation_id: Optional[Union[str, UUID]] = Field(
         None, description="Correlation ID to use for the event"
     )
+    delay_ms: Optional[int] = Field(
+        None, description="Optional delay in milliseconds for delayed event delivery"
+    )
     
     class Config:
         arbitrary_types_allowed = True
@@ -126,14 +129,15 @@ class HandlerResponse(FastStreamResponse):
             super().after_consume(msg)
         
         if not self.correlation_id:
-            decoded_body = msg.decoded_body()
-            if decoded_body and hasattr(decoded_body, "correlation_id"):
+            if hasattr(msg, "correlation_id") and msg.correlation_id:
+                # Use the correlation ID from the message object if available
+                self.correlation_id = str(msg.correlation_id)
+            elif "correlation_id" in msg.headers:
                 # Use the correlation ID from the message if available
-                self.correlation_id = str(msg.decoded_message.correlation_id)
-            else:
-                # Generate a new correlation ID if not provided
+                self.correlation_id = str(msg.headers["correlation_id"])
+            elif TaskContext.get_correlation_id():
+                # Use the correlation ID from TaskContext if available
                 self.correlation_id = str(TaskContext.get_correlation_id())
-                
 
         # Process publish events
         self._process_publish_events()
@@ -173,7 +177,8 @@ class HandlerResponse(FastStreamResponse):
                 actor_type=event_info.actor_type,
                 actor_id=event_info.actor_id,
                 payload=event_info.payload,
-                correlation_id=correlation_id
+                correlation_id=correlation_id,
+                delay_ms=getattr(event_info, "delay_ms", 0)  # Pass the delay_ms parameter to publish_event
             )
         except Exception as e:
             logger.error(f"Error publishing event from HandlerResponse: {e}", exc_info=True)

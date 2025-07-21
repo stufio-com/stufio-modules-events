@@ -1,5 +1,7 @@
 """Helper functions for publishing events from other modules."""
 from typing import Dict, Any, List, Optional, Type, Union
+
+from faststream.kafka.fastapi import KafkaMessage
 from .schemas.event_definition import EventDefinition
 from .schemas.base import ActorType, BaseEventPayload
 from .services.event_bus import get_event_bus
@@ -14,7 +16,8 @@ async def publish_event(
     payload: Optional[Dict[str, Any]] = None,
     correlation_id: Optional[str] = None,
     payload_class: Optional[Type[BaseEventPayload]] = None,
-    custom_headers: Optional[Dict[str, str]] = None
+    custom_headers: Optional[Dict[str, str]] = None,
+    delay_ms: Optional[int] = None
 ):
     """Helper function to publish an event from any module.
     
@@ -27,6 +30,7 @@ async def publish_event(
         correlation_id: Correlation ID for tracking related events
         payload_class: Optional class to validate the payload
         custom_headers: Optional custom headers to include with the message
+        delay_ms: Optional delay in milliseconds for delayed event delivery
     """
     event_bus = get_event_bus()
     
@@ -38,27 +42,45 @@ async def publish_event(
         payload=payload,
         correlation_id=correlation_id,
         payload_class=payload_class,
-        custom_headers=custom_headers
+        custom_headers=custom_headers,
+        delay_ms=delay_ms
     )
-
-
-def subscribe_to_event(entity_type: str, action: str, handler):
-    """Subscribe to events with a handler function.
-
-    Args:
-        entity_type: Type of entity to subscribe to
-        action: Action to subscribe to
-        handler: Function to call when event is received
-    """
-    event_bus = get_event_bus()
-    event_bus.subscribe(entity_type, action, handler)
-
 
 def register_module_events(
     module_name: str, events: List[Type[EventDefinition]]
 ) -> None:
     """Register all events from a module."""
     event_registry.register_module_events(module_name, events)
+
+# Helper functions for cleaner code
+def extract_event_metadata(msg: KafkaMessage) -> tuple[str, str]:
+    """Extract entity_type and action from message headers or topic."""
+    entity_type = "unknown"
+    action = "unknown"
+
+    # Try headers first
+    if hasattr(msg, "raw_message") and hasattr(msg.raw_message, "headers"):
+        headers = {k.decode('utf-8') if isinstance(k, bytes) else k: 
+                  v.decode('utf-8') if isinstance(v, bytes) else v 
+                  for k, v in getattr(msg.raw_message, "headers", [])}
+
+        if "entity_type" in headers:
+            entity_type = str(headers["entity_type"])
+            
+        if "action" in headers:
+            action = str(headers["action"])
+
+    # Fall back to topic parsing
+    if entity_type == "unknown" or action == "unknown":
+        topic = getattr(msg.raw_message, "topic", "") if hasattr(msg, "raw_message") and hasattr(msg.raw_message, "topic") else ""
+        topic_parts = topic.split(".")
+        if len(topic_parts) >= 3:
+            if entity_type == "unknown":
+                entity_type = topic_parts[-2]
+            if action == "unknown":
+                action = topic_parts[-1]
+
+    return entity_type, action
 
 
 def extract_headers_safely(msg) -> Dict[str, str]:
@@ -108,4 +130,3 @@ def extract_headers_safely(msg) -> Dict[str, str]:
         logging.getLogger(__name__).error(f"Error extracting headers: {e}", exc_info=True)
         
     return headers
-

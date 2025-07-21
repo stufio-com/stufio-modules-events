@@ -31,7 +31,7 @@ class CRUDKafkaTopics:
         """Get or create the Kafka admin client."""
         if self.admin_client is None:
             try:
-                bootstrap_servers = getattr(settings, "events_KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+                bootstrap_servers = getattr(settings, "events_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092")
                 self.admin_client = AIOKafkaAdminClient(
                     bootstrap_servers=bootstrap_servers,
                     client_id=f"stufio-admin-topics"
@@ -216,7 +216,7 @@ class CRUDKafkaTopics:
             # Use the consumer API to get offsets
             from aiokafka import AIOKafkaConsumer
             consumer = AIOKafkaConsumer(
-                bootstrap_servers=getattr(settings, "events_KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
+                bootstrap_servers=getattr(settings, "events_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092"),
                 client_id="stufio-admin-metrics"
             )
             await consumer.start()
@@ -502,7 +502,7 @@ class CRUDKafkaTopics:
             # Get message counts for each topic
             from aiokafka import AIOKafkaConsumer
             consumer = AIOKafkaConsumer(
-                bootstrap_servers=getattr(settings, "events_KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
+                bootstrap_servers=getattr(settings, "events_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092"),
                 client_id="stufio-admin-cleanup"
             )
             await consumer.start()

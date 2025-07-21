@@ -20,7 +20,7 @@ class KafkaTopicInitializer:
         """Initialize the Kafka admin client."""
         if self.admin_client is None:
             try:
-                bootstrap_servers = getattr(settings, "events_KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+                bootstrap_servers = getattr(settings, "events_KAFKA_BOOTSTRAP_SERVERS", "kafka:19092")
                 self.admin_client = AIOKafkaAdminClient(
                     bootstrap_servers=bootstrap_servers,
                     client_id=f"stufio-topic-initializer"

@@ -19,7 +19,7 @@ class EventsSettings(ModuleSettings):
 
     # Kafka settings with string handling for bootstrap servers
     KAFKA_ENABLED: bool = False
-    KAFKA_BOOTSTRAP_SERVERS: Union[str, List[str]] = ["kafka:9092"]
+    KAFKA_BOOTSTRAP_SERVERS: Union[str, List[str]] = ["kafka:19092"]
     KAFKA_TOPIC_PREFIX: str = "stufio.events"
     ASYNCAPI_PREFIX: str = "stufio.events"
     ASYNCAPI_DOCS_ENABLED: bool = True
@@ -48,12 +48,6 @@ class EventsSettings(ModuleSettings):
     KAFKA_MAX_POLL_INTERVAL_MS: int = 300000  # 5 minutes
     KAFKA_SESSION_TIMEOUT_MS: int = 60000  # 1 minute
     KAFKA_HEARTBEAT_INTERVAL_MS: int = 20000  # 20 seconds
-
-    # ClickHouse Kafka integration settings
-    KAFKA_TOPIC_EXPIRED: str = "nameniac_scrape_expired"
-    KAFKA_TOPIC_WHOIS: str = "nameniac_whois"
-    KAFKA_GROUP_EXPIRED_CLICKHOUSE: str = "consumer-ch-scrapeexpired"
-    KAFKA_GROUP_WHOIS_CLICKHOUSE: str = "consumer-ch-whois"
 
     @field_validator('KAFKA_BOOTSTRAP_SERVERS')
     @classmethod

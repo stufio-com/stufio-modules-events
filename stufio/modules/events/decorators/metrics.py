@@ -78,15 +78,41 @@ async def save_event_metrics(
             if provider_name not in ("mongodb", "clickhouse", "redis"):
                 all_metrics[provider_name] = provider_data
 
-        # Serialize custom metrics to JSON
+        # Serialize custom metrics to JSON with size check
         custom_metrics_json = None
         if all_metrics:
             try:
-                custom_metrics_json = json.dumps(all_metrics)
+                # First, check the size of the metrics data
+                metrics_str = json.dumps(all_metrics)
+                metrics_size = len(metrics_str)
+                
+                # If too large, truncate or summarize
+                if metrics_size > 100000:  # 100KB limit for custom metrics
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"⚠️ Custom metrics too large ({metrics_size} bytes), truncating")
+                    
+                    # Create a summary instead of the full data
+                    summary_metrics = {}
+                    for key, value in all_metrics.items():
+                        if isinstance(value, (dict, list)):
+                            summary_metrics[key] = f"<truncated: {len(str(value))} chars>"
+                        elif isinstance(value, str) and len(value) > 1000:
+                            summary_metrics[key] = value[:1000] + "... [truncated]"
+                        else:
+                            summary_metrics[key] = value
+                    
+                    custom_metrics_json = json.dumps(summary_metrics)
+                    logger.info(f"📦 Truncated custom metrics from {metrics_size} to {len(custom_metrics_json)} bytes")
+                else:
+                    custom_metrics_json = metrics_str
+                    
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.error(f"❌ Failed to serialize custom metrics: {e}")
+                # Create a minimal fallback
+                custom_metrics_json = json.dumps({"error": "serialization_failed", "metrics_count": len(all_metrics)})
 
         # Convert timestamps to datetime
         started_at_dt = datetime.fromtimestamp(started_at)

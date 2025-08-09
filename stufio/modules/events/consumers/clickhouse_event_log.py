@@ -1,6 +1,7 @@
 import asyncio
 import traceback
 from typing import Any, Optional
+from fastapi import logger
 from faststream.kafka.fastapi import KafkaMessage, Logger
 
 from ..crud import crud_error_log
@@ -58,8 +59,7 @@ async def log_event_to_clickhouse(msg: KafkaMessage, logger: Logger) -> None:
         from ..helpers import extract_headers_safely, extract_event_metadata
 
         headers = extract_headers_safely(msg)
-
-        logger.warning(f"Headers: {headers}")
+        # logger.warning(f"Headers: {headers}")
 
         # Try to get correlation_id from headers first
         correlation_id = headers.get('correlation_id')
@@ -96,14 +96,14 @@ async def log_event_to_clickhouse(msg: KafkaMessage, logger: Logger) -> None:
                 return None
 
         # Log body type and structure for debugging
-        kafka_broker.logger.info(f"Body type: {type(body)}, Body keys: {list(body.keys()) if isinstance(body, dict) else 'Not a dict'}")
+        # kafka_broker.logger.info(f"Body type: {type(body)}, Body keys: {list(body.keys()) if isinstance(body, dict) else 'Not a dict'}")
         if isinstance(body, dict) and 'event_id' in body:
             kafka_broker.logger.info(f"Event ID in body: {body['event_id']}")
 
         # 5. Convert to BaseEventMessage and extract further metadata
         try:
             event = BaseEventMessage.model_validate(body)
-            kafka_broker.logger.info(f"Parsed event {event_name} with ID {event.event_id}")
+            # kafka_broker.logger.info(f"Parsed event {event_name} with ID {event.event_id}")
         except Exception as e:
             kafka_broker.logger.error(f"Failed to validate message as BaseEventMessage: {e}")
             # Log the body structure for debugging
@@ -170,7 +170,7 @@ async def save_event_with_retry(event_log: EventLogCreate, event_name: str, max_
     while retries < max_retries:
         try:
             await crud_event_log.create(event_log)
-            kafka_broker.logger.info(f"Event {event_name} logged to Clickhouse with ID {event_log.event_id}")
+            # kafka_broker.logger.info(f"Event {event_name} logged to Clickhouse with ID {event_log.event_id}")
             return True
         except Exception as e:
             last_error = e

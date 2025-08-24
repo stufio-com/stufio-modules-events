@@ -33,7 +33,7 @@ class EventBus:
     _instance: Optional['EventBus'] = None
     _initialized: bool = False
 
-    kafka_client: Optional[KafkaBroker] = None
+    kafka_client: Optional[Union[KafkaBroker, Any]] = None  # Allow both KafkaBroker and KafkaBrokerMock
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -45,11 +45,25 @@ class EventBus:
         if self._initialized:
             return
 
-        # Use lazy import to avoid circular reference
-        from ..consumers.kafka import get_kafka_broker
-        kafka_client = get_kafka_broker()
-        if isinstance(kafka_client, KafkaBroker):
-            self.kafka_client = kafka_client
+        # Check if we're in testing mode
+        import os
+        is_testing = os.getenv("TESTING") == "1" or os.getenv("TESTING") == "true"
+        
+        if is_testing:
+            logger.info("Running in testing mode - using mock Kafka client")
+            # Use the mock broker from the consumers module
+            from ..consumers.kafka import KafkaBrokerMock
+            self.kafka_client = KafkaBrokerMock(logger)
+        else:
+            # Use lazy import to avoid circular reference
+            from ..consumers.kafka import get_kafka_broker
+            kafka_client = get_kafka_broker()
+            if kafka_client:
+                self.kafka_client = kafka_client
+            else:
+                logger.warning("Kafka client not available, events will not be published")
+                from ..consumers.kafka import KafkaBrokerMock
+                self.kafka_client = KafkaBrokerMock(logger)
 
         self.registry = EventRegistry()
         self.http_client = httpx.AsyncClient(timeout=30.0)
@@ -185,7 +199,7 @@ class EventBus:
             action=str(action) if action else "unknown",
             actor_type=actor_type or ActorType.SYSTEM,
             actor_id=actor_id or "system",
-            payload=validated_payload,
+            payload=validated_payload.model_dump() if validated_payload else None,  # Convert to dict
             correlation_id=correlation_id,
             message_class=message_class,  # Use the message class from the definition
             custom_topic=custom_topic,        # Pass custom topic
@@ -233,14 +247,21 @@ class EventBus:
         # Ensure Kafka client is initialized
         await self.initialize()
 
-        # Convert actor_type to string if it's an enum
-        if isinstance(actor_type, ActorType):
-            actor_type = actor_type.value
+        # Convert actor_type to enum if it's a string
+        if isinstance(actor_type, str):
+            try:
+                actor_type_enum = ActorType(actor_type)
+            except ValueError:
+                # If the string doesn't match any enum value, use SYSTEM as default
+                actor_type_enum = ActorType.SYSTEM
+                logger.warning(f"Unknown actor_type '{actor_type}', using SYSTEM")
+        else:
+            actor_type_enum = actor_type
 
         # Prepare payload and entity objects
         payload_obj = payload or {}
         entity_obj = Entity(type=entity_type, id=entity_id)
-        actor_obj = Actor(type=actor_type, id=actor_id)
+        actor_obj = Actor(type=actor_type_enum, id=actor_id)
 
         # Get correlation ID from parameter or TaskContext
         corr_id = (
@@ -286,6 +307,10 @@ class EventBus:
         try:
             logger.debug(f"Publishing to Kafka with headers: {kafka_headers}")
 
+            if not self.kafka_client:
+                logger.warning("Kafka client not initialized, skipping event publishing")
+                return event
+
             if delay_ms is not None and delay_ms > 0:
                 await self.publish_with_delay(
                     message=event,
@@ -322,7 +347,7 @@ class EventBus:
         return event
 
     async def publish_with_delay(
-        self, message, topic, key: str, headers: dict, correlation_id: str, delay_ms: int
+        self, message, topic, key: Union[str, bytes], headers: dict, correlation_id: str, delay_ms: int
     ):
         """
         Publish a message to Kafka with optional delivery delay.
@@ -332,14 +357,17 @@ class EventBus:
         delayed delivery support enabled on the broker.
 
         Args:
-            broker: The Kafka broker instance
             message: The message to publish
             topic: The topic to publish to
-            key: Optional message key for partitioning
+            key: Optional message key for partitioning (string or bytes)
             headers: Optional message headers
             correlation_id: Optional correlation ID
             delay_ms: Optional delay in milliseconds
         """
+        if not self.kafka_client:
+            logger.warning("Kafka client not initialized, skipping delayed event publishing")
+            return None
+            
         # Prepare headers with delay info if needed
         final_headers = headers.copy() if headers else {}
 
@@ -370,11 +398,14 @@ class EventBus:
 
             topic = settings.events_KAFKA_DELAYED_TOPIC_NAME
 
+        # Convert key to bytes if needed
+        key_bytes = key.encode('utf-8') if isinstance(key, str) else key
+
         # Call the regular publish method with the updated headers
         return await self.kafka_client.publish(
             message=message,
             topic=topic,
-            key=key,
+            key=key_bytes,
             headers=final_headers,
             correlation_id=correlation_id,
         )

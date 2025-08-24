@@ -122,8 +122,17 @@ class KafkaModuleMixin:
         await super().on_shutdown(app)
         await self.stop_kafka(app)
 
-    async def start_kafka(self: "ModuleInterface", app: StufioAPI) -> None:
+    async def start_kafka(self, app: StufioAPI) -> None:
         """Start the Kafka broker connection."""
+        import os
+        
+        # Check if we're in testing mode and skip real Kafka startup
+        is_testing = os.getenv("TESTING") == "1" or os.getenv("TESTING") == "true"
+        
+        if is_testing:
+            logger.info("Running in testing mode - skipping real Kafka broker startup")
+            return
+            
         if len(self._kafka_brokers) and self._require_start_stop:
             try:
                 for broker in self._kafka_brokers:
@@ -137,8 +146,17 @@ class KafkaModuleMixin:
             except Exception as e:
                 logger.error(f"❌ Failed to start Kafka: {str(e)}", exc_info=True)
 
-    async def stop_kafka(self: "ModuleInterface", app: StufioAPI) -> None:
+    async def stop_kafka(self, app: StufioAPI) -> None:
         """Stop the Kafka broker connection with proper cleanup."""
+        import os
+        
+        # Check if we're in testing mode and skip real Kafka shutdown
+        is_testing = os.getenv("TESTING") == "1" or os.getenv("TESTING") == "true"
+        
+        if is_testing:
+            logger.info("Running in testing mode - skipping real Kafka broker shutdown")
+            return
+            
         if len(self._kafka_brokers) and self._require_start_stop:
             for broker in self._kafka_brokers:
                 try:
@@ -252,6 +270,15 @@ class EventsModule(
 
     async def on_shutdown(self, app: "StufioAPI") -> None:
         """Called when the application shuts down."""
+        import os
+        
+        # Check if we're in testing mode and skip Kafka shutdown
+        is_testing = os.getenv("TESTING") == "1" or os.getenv("TESTING") == "true"
+        
+        if is_testing:
+            logger.info("Running in testing mode - skipping Kafka shutdown")
+            return
+            
         try:
             # Set a timeout for the normal shutdown
             try:

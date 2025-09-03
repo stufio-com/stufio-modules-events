@@ -1,11 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from pydantic import Field, UUID4
 from stufio.db.clickhouse_base import ClickhouseBase
 
 
 def datetime_now():
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 class EventMetricsModel(ClickhouseBase):
